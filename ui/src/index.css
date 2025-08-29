@@ -1,0 +1,206 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Neumorphic Enterprise Design System - All colors MUST be HSL */
+
+@layer base {
+  :root {
+    /* Neumorphic Background System */
+    --background: 210 20% 88%;
+    --surface: 210 20% 90%;
+    --surface-raised: 210 20% 92%;
+    --surface-pressed: 210 20% 86%;
+    --foreground: 220 15% 25%;
+
+    /* Neumorphic Shadows */
+    --shadow-light: 0 0 20px hsl(0 0% 100% / 0.8);
+    --shadow-dark: 0 0 20px hsl(220 15% 25% / 0.15);
+    --shadow-inset-light: inset 0 0 20px hsl(0 0% 100% / 0.8);
+    --shadow-inset-dark: inset 0 0 20px hsl(220 15% 25% / 0.15);
+
+    /* Enterprise Color Palette */
+    --primary: 215 25% 35%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 215 35% 55%;
+
+    --secondary: 210 20% 85%;
+    --secondary-foreground: 220 15% 35%;
+
+    --accent: 200 35% 45%;
+    --accent-foreground: 0 0% 100%;
+    --accent-light: 200 45% 65%;
+
+    --success: 145 55% 45%;
+    --success-foreground: 0 0% 100%;
+    
+    --warning: 35 85% 55%;
+    --warning-foreground: 220 15% 25%;
+    
+    --danger: 0 65% 55%;
+    --danger-foreground: 0 0% 100%;
+
+    --muted: 210 20% 82%;
+    --muted-foreground: 220 15% 45%;
+
+    --card: 210 20% 90%;
+    --card-foreground: 220 15% 25%;
+
+    --popover: 210 20% 92%;
+    --popover-foreground: 220 15% 25%;
+
+    --border: 210 20% 80%;
+    --input: 210 20% 90%;
+    --ring: 215 25% 35%;
+
+    --radius: 1.5rem;
+
+    /* Sidebar Colors */
+    --sidebar-background: 210 20% 87%;
+    --sidebar-foreground: 220 15% 35%;
+    --sidebar-primary: 215 25% 35%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 20% 85%;
+    --sidebar-accent-foreground: 220 15% 35%;
+    --sidebar-border: 210 20% 80%;
+    --sidebar-ring: 215 25% 35%;
+
+    /* Typography Scale */
+    --font-display: 'Inter', system-ui, sans-serif;
+    --font-body: 'Inter', system-ui, sans-serif;
+    
+    /* Spacing & Layout */
+    --header-height: 4rem;
+    --sidebar-width: 16rem;
+    --sidebar-collapsed: 4rem;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-body antialiased;
+  }
+}
+
+@layer components {
+  /* Neumorphic Component Base Classes */
+  .neumorphic {
+    @apply rounded-[var(--radius)] transition-all duration-300;
+    box-shadow: 
+      var(--shadow-light),
+      var(--shadow-dark);
+  }
+
+  .neumorphic-raised {
+    @apply neumorphic bg-surface-raised;
+  }
+
+  .neumorphic-pressed {
+    @apply rounded-[var(--radius)] bg-surface-pressed transition-all duration-150;
+    box-shadow: 
+      var(--shadow-inset-light),
+      var(--shadow-inset-dark);
+  }
+
+  .neumorphic-flat {
+    @apply rounded-[var(--radius)] bg-surface transition-all duration-300;
+    box-shadow: 
+      8px 8px 16px hsl(220 15% 25% / 0.1),
+      -8px -8px 16px hsl(0 0% 100% / 0.7);
+  }
+
+  .neumorphic-button {
+    @apply neumorphic-raised hover:neumorphic-flat active:neumorphic-pressed;
+    @apply cursor-pointer select-none;
+  }
+
+  .neumorphic-card {
+    @apply neumorphic-raised border-0;
+  }
+
+  .neumorphic-input {
+    @apply neumorphic-pressed border-0 outline-none;
+  }
+
+  /* Enterprise Typography */
+  .text-display {
+    @apply font-display font-semibold tracking-tight;
+  }
+
+  .text-body {
+    @apply font-body;
+  }
+
+  /* Status Indicators */
+  .status-success {
+    @apply bg-success/10 text-success border-success/20;
+  }
+
+  .status-warning {
+    @apply bg-warning/10 text-warning border-warning/20;
+  }
+
+  .status-danger {
+    @apply bg-danger/10 text-danger border-danger/20;
+  }
+
+  /* Workflow Step Indicators */
+  .step-active {
+    @apply neumorphic-raised bg-primary text-primary-foreground;
+  }
+
+  .step-completed {
+    @apply neumorphic-flat bg-success text-success-foreground;
+  }
+
+  .step-pending {
+    @apply neumorphic-flat bg-muted text-muted-foreground;
+  }
+
+  /* Chart Container */
+  .chart-container {
+    @apply neumorphic-card p-6;
+  }
+}
