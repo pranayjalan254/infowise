@@ -1,43 +1,44 @@
-import { useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { useState } from "react";
+import { NavLink, useLocation } from "react-router-dom";
+import { motion } from "framer-motion";
 import {
   LayoutDashboard,
+  Upload,
   FileText,
   FlaskConical,
   BarChart3,
   Settings,
   Menu,
-  X
-} from 'lucide-react';
-import { cn } from '@/lib/utils';
+  X,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const sidebarItems = [
   {
-    title: 'Dashboard',
-    href: '/dashboard',
-    icon: LayoutDashboard
+    title: "Dashboard",
+    href: "/dashboard",
+    icon: LayoutDashboard,
   },
   {
-    title: 'Document Ingestion',
-    href: '/ingestion',
-    icon: FileText
+    title: "Document Ingestion",
+    href: "/ingestion",
+    icon: Upload,
   },
   {
-    title: 'Sandbox',
-    href: '/sandbox',
-    icon: FlaskConical
+    title: "Sandbox",
+    href: "/sandbox",
+    icon: FlaskConical,
   },
   {
-    title: 'Reports',
-    href: '/reports',
-    icon: BarChart3
+    title: "Reports",
+    href: "/reports",
+    icon: BarChart3,
   },
   {
-    title: 'Settings',
-    href: '/settings',
-    icon: Settings
-  }
+    title: "Settings",
+    href: "/settings",
+    icon: Settings,
+  },
 ];
 
 export function AppSidebar() {
@@ -52,7 +53,7 @@ export function AppSidebar() {
       )}
       initial={false}
       animate={{
-        width: collapsed ? 'var(--sidebar-collapsed)' : 'var(--sidebar-width)'
+        width: collapsed ? "var(--sidebar-collapsed)" : "var(--sidebar-width)",
       }}
     >
       {/* Header */}
@@ -66,9 +67,13 @@ export function AppSidebar() {
               className="flex items-center space-x-2"
             >
               <div className="w-8 h-8 neumorphic-raised rounded-xl flex items-center justify-center bg-primary">
-                <span className="text-primary-foreground font-bold text-sm">I</span>
+                <span className="text-primary-foreground font-bold text-sm">
+                  I
+                </span>
               </div>
-              <span className="text-display text-lg text-foreground">Infowise</span>
+              <span className="text-display text-lg text-foreground">
+                Infowise
+              </span>
             </motion.div>
           )}
           <button
@@ -84,7 +89,7 @@ export function AppSidebar() {
       <nav className="p-4 space-y-2">
         {sidebarItems.map((item) => {
           const isActive = location.pathname === item.href;
-          
+
           return (
             <NavLink
               key={item.href}
@@ -92,7 +97,8 @@ export function AppSidebar() {
               className={cn(
                 "flex items-center space-x-3 px-3 py-3 rounded-xl transition-all duration-200",
                 "neumorphic-button text-sidebar-foreground hover:text-sidebar-primary",
-                isActive && "neumorphic-pressed bg-sidebar-primary text-sidebar-primary-foreground"
+                isActive &&
+                  "neumorphic-pressed bg-sidebar-primary text-sidebar-primary-foreground"
               )}
             >
               <item.icon size={20} className="flex-shrink-0" />

@@ -128,10 +128,30 @@ class ApiClient {
     return this.request<T>(endpoint, { method: "GET" });
   }
 
-  async post<T>(endpoint: string, data?: any): Promise<ApiResponse<T>> {
+  async post<T>(
+    endpoint: string,
+    data?: any,
+    customHeaders?: Record<string, string>
+  ): Promise<ApiResponse<T>> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...customHeaders,
+    };
+
+    // Don't set Content-Type for FormData
+    if (data instanceof FormData) {
+      delete headers["Content-Type"];
+    }
+
     return this.request<T>(endpoint, {
       method: "POST",
-      body: data ? JSON.stringify(data) : undefined,
+      body:
+        data instanceof FormData
+          ? data
+          : data
+          ? JSON.stringify(data)
+          : undefined,
+      headers,
     });
   }
 
@@ -144,6 +164,37 @@ class ApiClient {
 
   async delete<T>(endpoint: string): Promise<ApiResponse<T>> {
     return this.request<T>(endpoint, { method: "DELETE" });
+  }
+
+  async uploadFiles<T>(
+    endpoint: string,
+    files: FileList
+  ): Promise<ApiResponse<T>> {
+    const formData = new FormData();
+    Array.from(files).forEach((file) => {
+      formData.append("files", file);
+    });
+
+    const token = getAuthToken();
+    const config: RequestInit = {
+      method: "POST",
+      headers: {
+        ...(token && { Authorization: `Bearer ${token}` }),
+        "X-Request-ID": crypto.randomUUID(),
+        // Don't set Content-Type for FormData - browser will set it with boundary
+      },
+      body: formData,
+    };
+
+    const url = `${this.baseURL}${endpoint}`;
+    const response = await fetch(url, config);
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error?.message || "Upload failed");
+    }
+
+    return data;
   }
 
   async uploadFile(
@@ -191,12 +242,78 @@ export const authApi = {
   getCurrentUser: () => apiClient.get<User>("/auth/me"),
 };
 
+// Document API
 export const documentsApi = {
-  uploadFile: (file: File) => apiClient.uploadFile("/documents/upload", file),
+  upload: (files: FileList) => {
+    return apiClient.uploadFiles<{
+      uploaded_documents: Array<{
+        id: string;
+        name: string;
+        size: number;
+        type: string;
+        upload_date: string;
+      }>;
+      total_uploaded: number;
+      errors?: string[];
+    }>("/documents/upload", files);
+  },
 
-  getFiles: () => apiClient.get<FileUploadResponse[]>("/documents"),
+  list: () =>
+    apiClient.get<{
+      documents: Array<{
+        id: string;
+        name: string;
+        size: number;
+        type: string;
+        mime_type: string;
+        upload_date: string;
+        status: string;
+      }>;
+      total_count: number;
+    }>("/documents/list"),
 
-  deleteFile: (fileId: string) => apiClient.delete(`/documents/${fileId}`),
+  get: (documentId: string) =>
+    apiClient.get<{
+      id: string;
+      name: string;
+      size: number;
+      type: string;
+      mime_type: string;
+      upload_date: string;
+      status: string;
+      metadata: any;
+    }>(`/documents/${documentId}`),
+
+  delete: (documentId: string) => apiClient.delete(`/documents/${documentId}`),
+
+  getStats: () =>
+    apiClient.get<{
+      total_documents: number;
+      total_size_bytes: number;
+      total_size_mb: number;
+      file_types: Record<string, { count: number; size: number }>;
+    }>("/documents/stats"),
+};
+
+// File upload API
+export const fileApi = {
+  upload: (files: FileList) => {
+    return apiClient.uploadFiles<{
+      uploaded_documents: Array<{
+        id: string;
+        name: string;
+        size: number;
+        type: string;
+        upload_date: string;
+      }>;
+      total_uploaded: number;
+      errors?: string[];
+    }>("/files/upload", files);
+  },
+
+  getUploadHistory: () => apiClient.get("/files/history"),
+
+  deleteFile: (fileId: string) => apiClient.delete(`/files/${fileId}`),
 };
 
 export const piiApi = {

@@ -5,9 +5,7 @@ Uses SQLite for persistent storage.
 
 import sqlite3
 import os
-import json
 from typing import Optional, Dict, Any
-from flask import current_app
 from utils.helpers import get_current_timestamp
 
 

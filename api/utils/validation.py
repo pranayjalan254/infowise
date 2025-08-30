@@ -253,3 +253,34 @@ class ChatResponse(BaseModel):
     response: str = Field(..., description="Chat response")
     suggestions: Optional[List[str]] = Field(None, description="Follow-up suggestions")
     timestamp: str = Field(..., description="Response timestamp")
+
+
+# Utility functions
+def validate_file_upload(file, config) -> Optional[str]:
+    """
+    Validate uploaded file against configuration constraints.
+    
+    Args:
+        file: Werkzeug FileStorage object
+        config: Flask app configuration
+    
+    Returns:
+        Error message if validation fails, None if valid
+    """
+    if not file or not file.filename:
+        return "No file provided"
+    
+    # Check file extension
+    if '.' not in file.filename:
+        return "File must have an extension"
+    
+    file_ext = file.filename.rsplit('.', 1)[1].lower()
+    allowed_extensions = config.get('ALLOWED_EXTENSIONS', set())
+    
+    if file_ext not in allowed_extensions:
+        return f"File type '{file_ext}' not allowed. Allowed types: {', '.join(allowed_extensions)}"
+    
+    # Check file size (Flask handles MAX_CONTENT_LENGTH automatically)
+    # But we can add custom checks here if needed
+    
+    return None

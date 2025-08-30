@@ -39,7 +39,7 @@ class Config:
     
     # File upload settings
     MAX_CONTENT_LENGTH = int(os.getenv('MAX_CONTENT_LENGTH', '50')) * 1024 * 1024  # 50MB
-    UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', '/tmp/uploads')
+    UPLOAD_FOLDER = os.path.join(os.getcwd(), 'data', 'uploads')
     ALLOWED_EXTENSIONS = {'txt', 'pdf', 'doc', 'docx', 'xlsx', 'csv', 'json', 'xml'}
     
     # Application settings

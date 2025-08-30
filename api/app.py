@@ -63,9 +63,9 @@ def register_blueprints(app: Flask) -> None:
     from services.auth import auth_bp
     app.register_blueprint(auth_bp, url_prefix='/api/v1/auth')
     
-    # Document management (TODO)
-    # from services.documents import documents_bp
-    # app.register_blueprint(documents_bp, url_prefix='/api/v1')
+    # Document management
+    from services.documents import documents_bp
+    app.register_blueprint(documents_bp, url_prefix='/api/v1/documents')
     
     # PII detection (TODO)
     # from services.pii import pii_bp
