@@ -12,6 +12,7 @@ import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 import AuthPage from "./pages/AuthPage";
+import CallbackPage from "./pages/CallbackPage";
 import {
   queryClient,
   isAuthenticated,
@@ -61,14 +62,23 @@ const App = () => {
   }
 
   if (!user) {
-    //temporary
     return (
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <Toaster />
           <Sonner />
           <BrowserRouter>
-            <AuthPage onLogin={handleLogin} />
+            <Routes>
+              <Route
+                path="/auth"
+                element={<AuthPage onLogin={handleLogin} />}
+              />
+              <Route
+                path="/auth/callback"
+                element={<CallbackPage onLogin={handleLogin} />}
+              />
+              <Route path="*" element={<Navigate to="/auth" replace />} />
+            </Routes>
           </BrowserRouter>
         </TooltipProvider>
       </QueryClientProvider>

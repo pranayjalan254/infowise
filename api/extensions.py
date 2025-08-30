@@ -15,6 +15,14 @@ cors: Optional[CORS] = None
 jwt: Optional[JWTManager] = None
 
 
+def init_sessions(app: Flask) -> None:
+    """Initialize Flask sessions for OAuth state management."""
+    # Configure session settings
+    app.config['SESSION_COOKIE_SECURE'] = False  # Set to True in production with HTTPS
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
+
 def init_cors(app: Flask) -> None:
     """Initialize CORS with minimal configuration."""
     global cors
@@ -119,6 +127,11 @@ def init_all_extensions(app: Flask) -> None:
     """Initialize all extensions in correct order."""
     init_logging(app)
     setup_request_id_logging(app)
+    init_sessions(app)
     init_cors(app)
     init_jwt(app)
     init_security_headers(app)
+    
+    # Initialize MongoDB
+    from mongodb import init_mongodb
+    init_mongodb(app)

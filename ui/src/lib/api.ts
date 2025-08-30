@@ -240,6 +240,13 @@ export const authApi = {
   refreshToken: () => apiClient.post<AuthTokens>("/auth/refresh"),
 
   getCurrentUser: () => apiClient.get<User>("/auth/me"),
+
+  // Google OAuth methods
+  getGoogleAuthUrl: () =>
+    apiClient.get<{ authorization_url: string; state: string }>("/auth/google"),
+
+  verifyGoogleToken: (idToken: string) =>
+    apiClient.post<AuthResponse>("/auth/google/verify", { id_token: idToken }),
 };
 
 // Document API

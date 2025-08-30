@@ -12,8 +12,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { authApi, setAuthToken } from "@/lib/api";
+import GoogleSignInButton from "@/components/auth/GoogleSignInButton";
 
 interface AuthPageProps {
   onLogin: (user: any) => void;
@@ -204,6 +206,19 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
                     {isLoading ? "Signing in..." : "Sign in"}
                   </Button>
                 </form>
+
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <Separator className="w-full" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-background px-2 text-muted-foreground">
+                      Or continue with
+                    </span>
+                  </div>
+                </div>
+
+                <GoogleSignInButton onLogin={onLogin} disabled={isLoading} />
               </TabsContent>
 
               <TabsContent value="register" className="space-y-4">
@@ -314,6 +329,19 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
                     {isLoading ? "Creating account..." : "Create account"}
                   </Button>
                 </form>
+
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <Separator className="w-full" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-background px-2 text-muted-foreground">
+                      Or continue with
+                    </span>
+                  </div>
+                </div>
+
+                <GoogleSignInButton onLogin={onLogin} disabled={isLoading} />
               </TabsContent>
             </CardContent>
           </Tabs>

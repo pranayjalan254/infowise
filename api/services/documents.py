@@ -1,165 +1,29 @@
 """
 Document management service.
-Handles file upload, storage, and retrieval with user-specific folders.
+Handles file upload, storage, and retrieval using MongoDB GridFS.
 """
 
 import os
-import sqlite3
 import uuid
 from typing import List, Dict, Any, Optional
-from flask import Blueprint, request, current_app, send_file, make_response
+from flask import Blueprint, request, current_app, make_response, Response
 from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request, decode_token
 from werkzeug.utils import secure_filename
 from werkzeug.datastructures import FileStorage
 from utils.responses import success_response, error_response
 from utils.validation import validate_file_upload
 from utils.helpers import get_current_timestamp
+from mongodb import get_mongo_db
 
 documents_bp = Blueprint('documents', __name__)
 
 
-class DocumentDatabase:
-    """Database operations for document management."""
-    
-    def __init__(self, db_path: str = 'data/documents.db'):
-        """Initialize database connection."""
-        self.db_path = db_path
-        self.init_database()
-    
-    def init_database(self):
-        """Initialize document database tables."""
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS documents (
-                    id TEXT PRIMARY KEY,
-                    user_id TEXT NOT NULL,
-                    original_name TEXT NOT NULL,
-                    stored_name TEXT NOT NULL,
-                    file_path TEXT NOT NULL,
-                    file_size INTEGER NOT NULL,
-                    file_type TEXT NOT NULL,
-                    mime_type TEXT,
-                    upload_date TEXT NOT NULL,
-                    status TEXT DEFAULT 'uploaded',
-                    metadata TEXT
-                )
-            ''')
-            
-            conn.execute('''
-                CREATE INDEX IF NOT EXISTS idx_documents_user_id 
-                ON documents(user_id)
-            ''')
-            
-            conn.execute('''
-                CREATE INDEX IF NOT EXISTS idx_documents_upload_date 
-                ON documents(upload_date)
-            ''')
-            
-            conn.commit()
-    
-    def save_document(self, document_data: Dict[str, Any]) -> str:
-        """Save document information to database."""
-        doc_id = str(uuid.uuid4())
-        
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute('''
-                INSERT INTO documents 
-                (id, user_id, original_name, stored_name, file_path, 
-                 file_size, file_type, mime_type, upload_date, status, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                doc_id,
-                document_data['user_id'],
-                document_data['original_name'],
-                document_data['stored_name'],
-                document_data['file_path'],
-                document_data['file_size'],
-                document_data['file_type'],
-                document_data.get('mime_type'),
-                document_data['upload_date'],
-                document_data.get('status', 'uploaded'),
-                document_data.get('metadata', '{}')
-            ))
-            conn.commit()
-        
-        return doc_id
-    
-    def get_user_documents(self, user_id: str) -> List[Dict[str, Any]]:
-        """Get all documents for a specific user."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute('''
-                SELECT * FROM documents 
-                WHERE user_id = ? 
-                ORDER BY upload_date DESC
-            ''', (user_id,))
-            
-            documents = []
-            for row in cursor.fetchall():
-                doc = dict(row)
-                # Parse metadata if it exists
-                if doc['metadata']:
-                    try:
-                        doc['metadata'] = eval(doc['metadata'])
-                    except:
-                        doc['metadata'] = {}
-                documents.append(doc)
-            
-            return documents
-    
-    def get_document_by_id(self, doc_id: str, user_id: str) -> Optional[Dict[str, Any]]:
-        """Get a specific document by ID (ensuring it belongs to the user)."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute('''
-                SELECT * FROM documents 
-                WHERE id = ? AND user_id = ?
-            ''', (doc_id, user_id))
-            
-            row = cursor.fetchone()
-            if row:
-                doc = dict(row)
-                if doc['metadata']:
-                    try:
-                        doc['metadata'] = eval(doc['metadata'])
-                    except:
-                        doc['metadata'] = {}
-                return doc
-            
-            return None
-    
-    def delete_document(self, doc_id: str, user_id: str) -> bool:
-        """Delete a document from database."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute('''
-                DELETE FROM documents 
-                WHERE id = ? AND user_id = ?
-            ''', (doc_id, user_id))
-            conn.commit()
-            
-            return cursor.rowcount > 0
-
-
-# Initialize database
-doc_db = DocumentDatabase()
-
-
 class DocumentManager:
-    """File management operations."""
-    
-    @staticmethod
-    def get_user_upload_folder(user_id: str) -> str:
-        """Get or create user-specific upload folder."""
-        base_folder = current_app.config['UPLOAD_FOLDER']
-        user_folder = os.path.join(base_folder, f"user_{user_id}")
-        os.makedirs(user_folder, exist_ok=True)
-        return user_folder
+    """File management operations using MongoDB GridFS."""
     
     @staticmethod
     def save_uploaded_file(file: FileStorage, user_id: str) -> Dict[str, Any]:
-        """Save uploaded file to user's folder."""
+        """Save uploaded file to MongoDB GridFS."""
         if not file or not file.filename:
             raise ValueError("No file provided")
         
@@ -168,38 +32,24 @@ class DocumentManager:
         if not original_name:
             raise ValueError("Invalid filename")
         
-        # Generate unique filename
-        file_extension = os.path.splitext(original_name)[1]
-        stored_name = f"{uuid.uuid4()}{file_extension}"
-        
-        # Get user folder and save file
-        user_folder = DocumentManager.get_user_upload_folder(user_id)
-        file_path = os.path.join(user_folder, stored_name)
-        
-        file.save(file_path)
+        # Read file data
+        file_data = file.read()
+        file_size = len(file_data)
         
         # Get file info
-        file_size = os.path.getsize(file_path)
+        file_extension = os.path.splitext(original_name)[1]
         
         return {
             'original_name': original_name,
-            'stored_name': stored_name,
-            'file_path': file_path,
+            'file_data': file_data,
             'file_size': file_size,
             'file_type': file_extension.lower(),
             'mime_type': file.mimetype
         }
-    
-    @staticmethod
-    def delete_file(file_path: str) -> bool:
-        """Delete file from filesystem."""
-        try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                return True
-            return False
-        except Exception:
-            return False
+
+
+# MongoDB instance
+mongo_db = get_mongo_db()
 
 
 @documents_bp.route('/upload', methods=['POST'])
@@ -231,14 +81,14 @@ def upload_documents():
                 # Save file
                 file_info = DocumentManager.save_uploaded_file(file, user_id)
                 
-                # Save to database
+                # Store in MongoDB
                 document_data = {
                     'user_id': user_id,
                     'upload_date': get_current_timestamp(),
                     **file_info
                 }
                 
-                doc_id = doc_db.save_document(document_data)
+                doc_id = mongo_db.store_file(file_info['file_data'], document_data)
                 
                 uploaded_documents.append({
                     'id': doc_id,
@@ -283,7 +133,7 @@ def list_documents():
     """Get list of user's documents."""
     try:
         user_id = get_jwt_identity()
-        documents = doc_db.get_user_documents(user_id)
+        documents = mongo_db.list_user_documents(user_id)
         
         # Format response
         formatted_docs = []
@@ -317,7 +167,7 @@ def get_document(doc_id: str):
     """Get specific document details."""
     try:
         user_id = get_jwt_identity()
-        document = doc_db.get_document_by_id(doc_id, user_id)
+        document = mongo_db.get_document_metadata(doc_id, user_id)
         
         if not document:
             return error_response("NOT_FOUND", "Document not found", 404)
@@ -348,16 +198,8 @@ def delete_document(doc_id: str):
     try:
         user_id = get_jwt_identity()
         
-        # Get document info first
-        document = doc_db.get_document_by_id(doc_id, user_id)
-        if not document:
-            return error_response("NOT_FOUND", "Document not found", 404)
-        
-        # Delete from filesystem
-        DocumentManager.delete_file(document['file_path'])
-        
-        # Delete from database
-        success = doc_db.delete_document(doc_id, user_id)
+        # Delete from MongoDB
+        success = mongo_db.delete_document(doc_id, user_id)
         
         if success:
             return success_response(message="Document deleted successfully")
@@ -375,28 +217,10 @@ def get_document_stats():
     """Get user's document statistics."""
     try:
         user_id = get_jwt_identity()
-        documents = doc_db.get_user_documents(user_id)
-        
-        # Calculate stats
-        total_count = len(documents)
-        total_size = sum(doc['file_size'] for doc in documents)
-        
-        # Group by file type
-        type_stats = {}
-        for doc in documents:
-            file_type = doc['file_type'] or 'unknown'
-            if file_type not in type_stats:
-                type_stats[file_type] = {'count': 0, 'size': 0}
-            type_stats[file_type]['count'] += 1
-            type_stats[file_type]['size'] += doc['file_size']
+        stats = mongo_db.get_user_stats(user_id)
         
         return success_response(
-            data={
-                'total_documents': total_count,
-                'total_size_bytes': total_size,
-                'total_size_mb': round(total_size / (1024 * 1024), 2),
-                'file_types': type_stats
-            },
+            data=stats,
             message="Document statistics retrieved successfully"
         )
     
@@ -430,24 +254,15 @@ def view_document(doc_id: str):
             except Exception as e:
                 return error_response("UNAUTHORIZED", "Authentication required", 401)
         
-        document = doc_db.get_document_by_id(doc_id, user_id)
+        document = mongo_db.get_file(doc_id, user_id)
         
         if not document:
             return error_response("NOT_FOUND", "Document not found", 404)
         
-        file_path = document['file_path']
-        
-        # Check if file exists
-        if not os.path.exists(file_path):
-            return error_response("FILE_NOT_FOUND", "File not found on disk", 404)
-        
-        # Set appropriate headers for inline viewing
-        response = make_response(send_file(
-            file_path,
-            mimetype=document['mime_type'] or 'application/octet-stream',
-            as_attachment=False,
-            download_name=document['original_name']
-        ))
+        # Create response with file data
+        response = make_response(document['file_data'])
+        response.headers['Content-Type'] = document['mime_type'] or 'application/octet-stream'
+        response.headers['Content-Disposition'] = f'inline; filename="{document["original_name"]}"'
         
         # Add CORS headers for iframe access
         response.headers['Access-Control-Allow-Origin'] = '*'
@@ -471,24 +286,15 @@ def download_document(doc_id: str):
     """Download document as attachment."""
     try:
         user_id = get_jwt_identity()
-        document = doc_db.get_document_by_id(doc_id, user_id)
+        document = mongo_db.get_file(doc_id, user_id)
         
         if not document:
             return error_response("NOT_FOUND", "Document not found", 404)
         
-        file_path = document['file_path']
-        
-        # Check if file exists
-        if not os.path.exists(file_path):
-            return error_response("FILE_NOT_FOUND", "File not found on disk", 404)
-        
-        # Send file as attachment for download
-        response = make_response(send_file(
-            file_path,
-            mimetype=document['mime_type'] or 'application/octet-stream',
-            as_attachment=True,
-            download_name=document['original_name']
-        ))
+        # Create response with file data
+        response = make_response(document['file_data'])
+        response.headers['Content-Type'] = document['mime_type'] or 'application/octet-stream'
+        response.headers['Content-Disposition'] = f'attachment; filename="{document["original_name"]}"'
         
         current_app.logger.info(f"Document {doc_id} downloaded by user {user_id}")
         return response

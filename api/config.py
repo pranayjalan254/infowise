@@ -32,6 +32,9 @@ class Config:
     # CORS settings
     CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'http://localhost:8081').split(',')
     
+    # Frontend URL
+    FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:8081')
+    
     # Google OAuth settings
     GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')
     GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET')
@@ -45,6 +48,10 @@ class Config:
     # Application settings
     APP_NAME = os.getenv('APP_NAME', 'Data Guardians API')
     APP_VERSION = os.getenv('APP_VERSION', '1.0.0')
+    
+    # MongoDB settings
+    MONGODB_CONNECTION_STRING = os.getenv('MONGODB_CONNECTION_STRING')
+    MONGODB_DATABASE = os.getenv('MONGODB_DATABASE', 'infowise')
     
     @staticmethod
     def init_app(app) -> None:
