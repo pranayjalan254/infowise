@@ -7,8 +7,8 @@ import os
 import sqlite3
 import uuid
 from typing import List, Dict, Any, Optional
-from flask import Blueprint, request, current_app
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask import Blueprint, request, current_app, send_file, make_response
+from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request, decode_token
 from werkzeug.utils import secure_filename
 from werkzeug.datastructures import FileStorage
 from utils.responses import success_response, error_response
@@ -403,3 +403,96 @@ def get_document_stats():
     except Exception as e:
         current_app.logger.error(f"Document stats error: {str(e)}")
         return error_response("STATS_ERROR", "Failed to retrieve statistics", 500)
+
+
+@documents_bp.route('/<doc_id>/view', methods=['GET'])
+def view_document(doc_id: str):
+    """Serve document content for viewing in iframe."""
+    try:
+        # Check for token in query parameter (for iframe access)
+        token = request.args.get('token')
+        user_id = None
+        
+        if token:
+            try:
+                # Verify the token manually for iframe access
+                from flask_jwt_extended import decode_token
+                decoded = decode_token(token)
+                user_id = decoded['sub']
+            except Exception as e:
+                current_app.logger.error(f"Token verification failed: {str(e)}")
+                return error_response("UNAUTHORIZED", "Invalid token", 401)
+        else:
+            # Try JWT from header
+            try:
+                verify_jwt_in_request()
+                user_id = get_jwt_identity()
+            except Exception as e:
+                return error_response("UNAUTHORIZED", "Authentication required", 401)
+        
+        document = doc_db.get_document_by_id(doc_id, user_id)
+        
+        if not document:
+            return error_response("NOT_FOUND", "Document not found", 404)
+        
+        file_path = document['file_path']
+        
+        # Check if file exists
+        if not os.path.exists(file_path):
+            return error_response("FILE_NOT_FOUND", "File not found on disk", 404)
+        
+        # Set appropriate headers for inline viewing
+        response = make_response(send_file(
+            file_path,
+            mimetype=document['mime_type'] or 'application/octet-stream',
+            as_attachment=False,
+            download_name=document['original_name']
+        ))
+        
+        # Add CORS headers for iframe access
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        
+        # Use a custom header to signal that this endpoint should allow iframe embedding
+        response.headers['X-Allow-Iframe'] = 'true'
+        
+        current_app.logger.info(f"Document {doc_id} viewed by user {user_id}")
+        return response
+    
+    except Exception as e:
+        current_app.logger.error(f"Document view error: {str(e)}")
+        return error_response("VIEW_ERROR", "Failed to view document", 500)
+
+
+@documents_bp.route('/<doc_id>/download', methods=['GET'])
+@jwt_required()
+def download_document(doc_id: str):
+    """Download document as attachment."""
+    try:
+        user_id = get_jwt_identity()
+        document = doc_db.get_document_by_id(doc_id, user_id)
+        
+        if not document:
+            return error_response("NOT_FOUND", "Document not found", 404)
+        
+        file_path = document['file_path']
+        
+        # Check if file exists
+        if not os.path.exists(file_path):
+            return error_response("FILE_NOT_FOUND", "File not found on disk", 404)
+        
+        # Send file as attachment for download
+        response = make_response(send_file(
+            file_path,
+            mimetype=document['mime_type'] or 'application/octet-stream',
+            as_attachment=True,
+            download_name=document['original_name']
+        ))
+        
+        current_app.logger.info(f"Document {doc_id} downloaded by user {user_id}")
+        return response
+    
+    except Exception as e:
+        current_app.logger.error(f"Document download error: {str(e)}")
+        return error_response("DOWNLOAD_ERROR", "Failed to download document", 500)

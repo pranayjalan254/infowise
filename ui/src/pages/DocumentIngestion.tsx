@@ -1,18 +1,9 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import {
-  ChevronLeft,
-  ChevronRight,
-  CheckCircle,
-  FileText,
-  ArrowRight,
-} from "lucide-react";
+import { ChevronLeft, ChevronRight, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocumentUpload } from "@/components/ingestion/DocumentUpload";
-import { WorkflowSteps } from "@/components/ingestion/WorkflowSteps";
-import { DetectionStep } from "@/components/ingestion/DetectionStep";
-import { PolicyAdvisorStep } from "@/components/ingestion/PolicyAdvisorStep";
+import { DocumentReview } from "@/components/ingestion/DocumentReview";
 import { MaskingStep } from "@/components/ingestion/MaskingStep";
 import { QAStep } from "@/components/ingestion/QAStep";
 import { useNavigate } from "react-router-dom";
@@ -33,15 +24,16 @@ interface WorkflowStep {
 }
 
 const initialWorkflowSteps: WorkflowStep[] = [
-  { id: "detection", name: "Detection", status: "pending" },
-  { id: "policy", name: "Policy Advisor", status: "pending" },
   { id: "masking", name: "Masking", status: "pending" },
   { id: "qa", name: "Quality Assurance", status: "pending" },
 ];
 
 export default function DocumentIngestion() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
-  const [hasStartedProcessing, setHasStartedProcessing] = useState(false);
+  const [uploadedDocumentIds, setUploadedDocumentIds] = useState<string[]>([]);
+  const [currentPhase, setCurrentPhase] = useState<
+    "upload" | "review" | "masking" | "qa"
+  >("upload");
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<string[]>([]);
   const [workflowSteps, setWorkflowSteps] = useState(initialWorkflowSteps);
@@ -49,13 +41,41 @@ export default function DocumentIngestion() {
 
   const handleUploadComplete = (files: UploadedFile[]) => {
     setUploadedFiles(files);
-    setHasStartedProcessing(true);
+    // Extract document IDs from uploaded files
+    const documentIds = files.map((file) => file.id);
+    setUploadedDocumentIds(documentIds);
+    setCurrentPhase("review");
+  };
+
+  const handleDetectPII = () => {
+    setCurrentPhase("masking");
     // Mark first step as active
     setWorkflowSteps((prev) =>
       prev.map((step, index) =>
         index === 0 ? { ...step, status: "active" } : step
       )
     );
+  };
+
+  const handleMaskPII = () => {
+    // Mark current step as completed and next as active
+    const currentStepId = workflowSteps[currentStepIndex].id;
+    setCompletedSteps((prev) => [...prev, currentStepId]);
+
+    setWorkflowSteps((prev) =>
+      prev.map((step, index) => {
+        if (index === currentStepIndex) {
+          return { ...step, status: "completed" };
+        } else if (index === currentStepIndex + 1) {
+          return { ...step, status: "active" };
+        }
+        return step;
+      })
+    );
+
+    // Move to next step
+    setCurrentStepIndex((prev) => prev + 1);
+    setCurrentPhase("qa");
   };
 
   const handleNextStep = () => {
@@ -94,7 +114,6 @@ export default function DocumentIngestion() {
       );
 
       // Move to previous step
-      setCurrentStepIndex((prev) => prev - 1);
     }
   };
 
@@ -102,16 +121,12 @@ export default function DocumentIngestion() {
     const currentStep = workflowSteps[currentStepIndex];
 
     switch (currentStep.id) {
-      case "detection":
-        return <DetectionStep />;
-      case "policy":
-        return <PolicyAdvisorStep />;
       case "masking":
-        return <MaskingStep />;
+        return <MaskingStep onMaskPII={handleMaskPII} />;
       case "qa":
         return <QAStep />;
       default:
-        return <DetectionStep />;
+        return <MaskingStep onMaskPII={handleMaskPII} />;
     }
   };
 
@@ -135,78 +150,26 @@ export default function DocumentIngestion() {
           Document Ingestion
         </h1>
         <p className="text-muted-foreground">
-          {!hasStartedProcessing
+          {currentPhase === "upload"
             ? "Upload documents to begin the privacy and compliance workflow"
+            : currentPhase === "review"
+            ? "Review your uploaded documents before PII detection"
             : "Process documents through the complete privacy and compliance workflow"}
         </p>
       </motion.div>
 
-      {!hasStartedProcessing ? (
+      {currentPhase === "upload" ? (
         /* Upload Phase */
         <DocumentUpload onUploadComplete={handleUploadComplete} />
+      ) : currentPhase === "review" ? (
+        /* Document Review Phase */
+        <DocumentReview
+          uploadedDocumentIds={uploadedDocumentIds}
+          onDetectPII={handleDetectPII}
+        />
       ) : (
         /* Workflow Phase */
         <>
-          {/* Uploaded Files Summary */}
-          <motion.div
-            className="neumorphic-card p-6"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-foreground">
-                Uploaded Documents ({uploadedFiles.length})
-              </h3>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => navigate("/dashboard")}
-                className="neumorphic-button"
-              >
-                <FileText size={16} className="mr-2" />
-                View on Dashboard
-                <ArrowRight size={14} className="ml-2" />
-              </Button>
-            </div>
-
-            <div className="grid gap-3">
-              {uploadedFiles.slice(0, 3).map((file) => (
-                <div
-                  key={file.id}
-                  className="flex items-center justify-between p-3 neumorphic-flat rounded-lg"
-                >
-                  <div className="flex items-center space-x-3">
-                    <FileText className="w-5 h-5 text-blue-500" />
-                    <div>
-                      <div className="font-medium text-foreground text-sm">
-                        {file.name}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {(file.size / 1024 / 1024).toFixed(2)} MB
-                      </div>
-                    </div>
-                  </div>
-                  <CheckCircle className="w-5 h-5 text-green-500" />
-                </div>
-              ))}
-
-              {uploadedFiles.length > 3 && (
-                <div className="text-center text-sm text-muted-foreground">
-                  ... and {uploadedFiles.length - 3} more documents
-                </div>
-              )}
-            </div>
-          </motion.div>
-
-          {/* Workflow Steps Navigation */}
-          <WorkflowSteps
-            steps={workflowSteps}
-            currentStep={workflowSteps[currentStepIndex].id}
-            currentStepIndex={currentStepIndex}
-            totalSteps={workflowSteps.length}
-          />
-
           {/* Step Content */}
           <motion.div
             key={currentStepIndex}
@@ -259,56 +222,10 @@ export default function DocumentIngestion() {
                     onClick={handleNextStep}
                     className="neumorphic-button"
                   >
-                    Next Step
+                    Next
                     <ChevronRight size={16} className="ml-2" />
                   </Button>
                 )}
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Processing Summary */}
-          <motion.div
-            className="neumorphic-card p-6"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.3 }}
-          >
-            <h3 className="text-lg font-semibold text-foreground mb-4">
-              Processing Summary
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="neumorphic-flat p-4 rounded-xl text-center">
-                <div className="text-2xl font-bold text-foreground mb-1">
-                  {uploadedFiles.length}
-                </div>
-                <div className="text-sm text-muted-foreground">Documents</div>
-              </div>
-
-              <div className="neumorphic-flat p-4 rounded-xl text-center">
-                <div className="text-2xl font-bold text-primary mb-1">
-                  {currentStepIndex >= 0 ? "147" : "0"}
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  PII Detected
-                </div>
-              </div>
-
-              <div className="neumorphic-flat p-4 rounded-xl text-center">
-                <div className="text-2xl font-bold text-warning mb-1">
-                  {currentStepIndex >= 1 ? "23" : "0"}
-                </div>
-                <div className="text-sm text-muted-foreground">Risk Items</div>
-              </div>
-
-              <div className="neumorphic-flat p-4 rounded-xl text-center">
-                <div className="text-2xl font-bold text-success mb-1">
-                  {currentStepIndex >= 2 ? "124" : "0"}
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  Items Masked
-                </div>
               </div>
             </div>
           </motion.div>

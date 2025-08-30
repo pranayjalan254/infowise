@@ -293,6 +293,43 @@ export const documentsApi = {
       total_size_mb: number;
       file_types: Record<string, { count: number; size: number }>;
     }>("/documents/stats"),
+
+  getViewUrl: (documentId: string) => {
+    const token = getAuthToken();
+    return `${API_BASE_URL}/documents/${documentId}/view?token=${token}`;
+  },
+
+  getDownloadUrl: (documentId: string) => {
+    const token = getAuthToken();
+    return `${API_BASE_URL}/documents/${documentId}/download?token=${token}`;
+  },
+
+  downloadDocument: async (documentId: string, fileName: string) => {
+    const token = getAuthToken();
+    const response = await fetch(
+      `${API_BASE_URL}/documents/${documentId}/download`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("Download failed");
+    }
+
+    // Create blob and trigger download
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  },
 };
 
 // File upload API

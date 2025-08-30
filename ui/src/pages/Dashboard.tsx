@@ -22,8 +22,6 @@ import {
   Download,
   Trash2,
   Search,
-  Filter,
-  CheckCircle,
 } from "lucide-react";
 import { MetricCard } from "@/components/ui/metric-card";
 import { WorkflowTracker } from "@/components/ui/workflow-tracker";
@@ -37,11 +35,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  mockDashboardMetrics,
-  mockWorkflowSteps,
-  chartData,
-} from "@/data/mockData";
+import { mockWorkflowSteps, chartData } from "@/data/mockData";
 import { documentsApi } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
@@ -215,18 +209,6 @@ export default function Dashboard() {
             />
           </motion.div>
         )}
-
-        {/* Static Metrics */}
-        {mockDashboardMetrics.slice(0, 3).map((metric, index) => (
-          <motion.div
-            key={metric.id}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.2 + index * 0.05 }}
-          >
-            <MetricCard metric={metric} index={index + 2} />
-          </motion.div>
-        ))}
       </div>
 
       {/* Recent Documents Section */}

@@ -101,8 +101,17 @@ def init_security_headers(app: Flask) -> None:
     @app.after_request
     def add_security_headers(response):
         response.headers['X-Content-Type-Options'] = 'nosniff'
-        response.headers['X-Frame-Options'] = 'DENY'
         response.headers['X-XSS-Protection'] = '1; mode=block'
+        
+        # Check if this endpoint should allow iframe embedding
+        if response.headers.get('X-Allow-Iframe') == 'true':
+            # Remove the custom header (cleanup)
+            response.headers.pop('X-Allow-Iframe', None)
+            # Don't set X-Frame-Options to allow iframe embedding
+        else:
+            # Set X-Frame-Options to DENY for all other endpoints
+            response.headers['X-Frame-Options'] = 'DENY'
+        
         return response
 
 
