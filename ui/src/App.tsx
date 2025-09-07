@@ -13,6 +13,7 @@ import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 import AuthPage from "./pages/AuthPage";
 import CallbackPage from "./pages/CallbackPage";
+import LandingPage from "./pages/LandingPage.tsx";
 import {
   queryClient,
   isAuthenticated,
@@ -69,6 +70,7 @@ const App = () => {
           <Sonner />
           <BrowserRouter>
             <Routes>
+              <Route path="/" element={<LandingPage />} />
               <Route
                 path="/auth"
                 element={<AuthPage onLogin={handleLogin} />}
@@ -77,7 +79,7 @@ const App = () => {
                 path="/auth/callback"
                 element={<CallbackPage onLogin={handleLogin} />}
               />
-              <Route path="*" element={<Navigate to="/auth" replace />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </BrowserRouter>
         </TooltipProvider>

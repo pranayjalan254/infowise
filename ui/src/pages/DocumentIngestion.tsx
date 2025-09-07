@@ -147,14 +147,18 @@ export default function DocumentIngestion() {
         transition={{ duration: 0.3 }}
       >
         <h1 className="text-3xl font-bold text-display text-foreground mb-2">
-          Document Ingestion
+          {currentPhase === "upload"
+            ? "Document Ingestion"
+            : currentPhase === "review"
+            ? ""
+            : ""}
         </h1>
         <p className="text-muted-foreground">
           {currentPhase === "upload"
             ? "Upload documents to begin the privacy and compliance workflow"
             : currentPhase === "review"
-            ? "Review your uploaded documents before PII detection"
-            : "Process documents through the complete privacy and compliance workflow"}
+            ? ""
+            : ""}
         </p>
       </motion.div>
 
@@ -168,7 +172,6 @@ export default function DocumentIngestion() {
           onDetectPII={handleDetectPII}
         />
       ) : (
-        /* Workflow Phase */
         <>
           {/* Step Content */}
           <motion.div

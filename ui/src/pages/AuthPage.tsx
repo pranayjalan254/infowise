@@ -87,7 +87,7 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
         onLogin(response.data.user);
         toast({
           title: "Registration successful",
-          description: `Welcome to Data Guardians, ${response.data.user.first_name}!`,
+          description: `Welcome to Infowise, ${response.data.user.first_name}!`,
         });
       }
     } catch (error) {
@@ -117,7 +117,7 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
             animate={{ opacity: 1 }}
             transition={{ delay: 0.2 }}
           >
-            Data Guardians
+            Infowise
           </motion.h1>
           <motion.p
             className="text-muted-foreground"
@@ -224,7 +224,7 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
               <TabsContent value="register" className="space-y-4">
                 <CardTitle>Create account</CardTitle>
                 <CardDescription>
-                  Sign up for a new Data Guardians account
+                  Sign up for a new Infowise account
                 </CardDescription>
 
                 <form onSubmit={handleRegister} className="space-y-4">
