@@ -43,9 +43,6 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # Register error handlers
     register_error_handlers(app)
     
-    # Add JWT token blacklist checker
-    setup_jwt_blacklist_checker(app)
-    
     # Log startup info
     app.logger.info(f"Application started - Environment: {config_name}")
     
@@ -67,9 +64,13 @@ def register_blueprints(app: Flask) -> None:
     from services.documents import documents_bp
     app.register_blueprint(documents_bp, url_prefix='/api/v1/documents')
     
-    # PII detection (TODO)
-    # from services.pii import pii_bp
-    # app.register_blueprint(pii_bp, url_prefix='/api/v1')
+    # PII detection
+    from services.pii_detection import pii_detection_bp
+    app.register_blueprint(pii_detection_bp, url_prefix='/api/v1/pii')
+    
+    # PII masking
+    from services.pii_masking import pii_masking_bp
+    app.register_blueprint(pii_masking_bp, url_prefix='/api/v1/masking')
     
     # Compliance checking (TODO)
     # from services.compliance import compliance_bp
@@ -94,17 +95,6 @@ def register_blueprints(app: Flask) -> None:
     # Sandbox/Chat (TODO)
     # from services.sandbox import sandbox_bp
     # app.register_blueprint(sandbox_bp, url_prefix='/api/v1')
-
-
-def setup_jwt_blacklist_checker(app: Flask) -> None:
-    """Set up JWT token blacklist checking."""
-    from extensions import jwt
-    
-    if jwt:
-        @jwt.token_in_blocklist_loader
-        def check_if_token_revoked(jwt_header, jwt_payload):
-            from services.auth import is_token_blacklisted
-            return is_token_blacklisted(jwt_payload['jti'])
 
 
 # Create app instance for direct execution

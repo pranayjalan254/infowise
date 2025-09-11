@@ -259,6 +259,41 @@ class MongoDatabase:
             current_app.logger.error(f"Document deletion error: {str(e)}")
             return False
     
+    def update_document_metadata(self, doc_id: str, user_id: str, metadata_update: Dict[str, Any]) -> bool:
+        """
+        Update document metadata.
+        
+        Args:
+            doc_id: Document ID
+            user_id: User ID for authorization
+            metadata_update: Metadata to update/merge
+            
+        Returns:
+            True if updated successfully, False otherwise
+        """
+        if self._documents_collection is None:
+            raise RuntimeError("MongoDB not properly initialized")
+            
+        try:
+            # Update document metadata
+            result = self._documents_collection.update_one(
+                {
+                    '_id': ObjectId(doc_id),
+                    'user_id': user_id
+                },
+                {
+                    '$set': {
+                        f'metadata.{k}': v for k, v in metadata_update.items()
+                    }
+                }
+            )
+            
+            return result.matched_count > 0
+            
+        except Exception as e:
+            current_app.logger.error(f"Document metadata update error: {str(e)}")
+            return False
+    
     def get_user_stats(self, user_id: str) -> Dict[str, Any]:
         """
         Get user document statistics.

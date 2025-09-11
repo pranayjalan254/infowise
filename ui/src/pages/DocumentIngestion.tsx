@@ -4,7 +4,9 @@ import { ChevronLeft, ChevronRight, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { DocumentUpload } from "@/components/ingestion/DocumentUpload";
 import { DocumentReview } from "@/components/ingestion/DocumentReview";
+import { DetectionStep } from "@/components/ingestion/DetectionStep";
 import { MaskingStep } from "@/components/ingestion/MaskingStep";
+import { MaskingResultsStep } from "@/components/ingestion/MaskingResultsStep";
 import { QAStep } from "@/components/ingestion/QAStep";
 import { useNavigate } from "react-router-dom";
 
@@ -24,19 +26,21 @@ interface WorkflowStep {
 }
 
 const initialWorkflowSteps: WorkflowStep[] = [
+  { id: "detection", name: "PII Detection", status: "pending" },
   { id: "masking", name: "Masking", status: "pending" },
-  { id: "qa", name: "Quality Assurance", status: "pending" },
+  { id: "results", name: "Results", status: "pending" },
 ];
 
 export default function DocumentIngestion() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [uploadedDocumentIds, setUploadedDocumentIds] = useState<string[]>([]);
   const [currentPhase, setCurrentPhase] = useState<
-    "upload" | "review" | "masking" | "qa"
+    "upload" | "review" | "detection" | "masking" | "results"
   >("upload");
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [completedSteps, setCompletedSteps] = useState<string[]>([]);
   const [workflowSteps, setWorkflowSteps] = useState(initialWorkflowSteps);
+  const [detectedPIIData, setDetectedPIIData] = useState<any>(null);
   const navigate = useNavigate();
 
   const handleUploadComplete = (files: UploadedFile[]) => {
@@ -48,13 +52,36 @@ export default function DocumentIngestion() {
   };
 
   const handleDetectPII = () => {
-    setCurrentPhase("masking");
+    setCurrentPhase("detection");
     // Mark first step as active
     setWorkflowSteps((prev) =>
       prev.map((step, index) =>
         index === 0 ? { ...step, status: "active" } : step
       )
     );
+  };
+
+  const handleDetectionComplete = (detectionResults: any) => {
+    setDetectedPIIData(detectionResults);
+
+    // Mark detection step as completed and next as active
+    const currentStepId = workflowSteps[currentStepIndex].id;
+    setCompletedSteps((prev) => [...prev, currentStepId]);
+
+    setWorkflowSteps((prev) =>
+      prev.map((step, index) => {
+        if (index === currentStepIndex) {
+          return { ...step, status: "completed" };
+        } else if (index === currentStepIndex + 1) {
+          return { ...step, status: "active" };
+        }
+        return step;
+      })
+    );
+
+    // Move to next step
+    setCurrentStepIndex((prev) => prev + 1);
+    setCurrentPhase("masking");
   };
 
   const handleMaskPII = () => {
@@ -75,7 +102,12 @@ export default function DocumentIngestion() {
 
     // Move to next step
     setCurrentStepIndex((prev) => prev + 1);
-    setCurrentPhase("qa");
+    setCurrentPhase("results");
+  };
+
+  const handleWorkflowComplete = () => {
+    // Navigate to dashboard or another page
+    navigate("/dashboard");
   };
 
   const handleNextStep = () => {
@@ -121,12 +153,35 @@ export default function DocumentIngestion() {
     const currentStep = workflowSteps[currentStepIndex];
 
     switch (currentStep.id) {
+      case "detection":
+        return (
+          <DetectionStep
+            documentIds={uploadedDocumentIds}
+            onDetectionComplete={handleDetectionComplete}
+          />
+        );
       case "masking":
-        return <MaskingStep onMaskPII={handleMaskPII} />;
-      case "qa":
-        return <QAStep />;
+        return (
+          <MaskingStep
+            onMaskPII={handleMaskPII}
+            detectedPIIData={detectedPIIData}
+          />
+        );
+      case "results":
+        return (
+          <MaskingResultsStep
+            onComplete={handleWorkflowComplete}
+            detectedPIIData={detectedPIIData}
+            documentId={uploadedDocumentIds[0]} // Pass the current document ID
+          />
+        );
       default:
-        return <MaskingStep onMaskPII={handleMaskPII} />;
+        return (
+          <DetectionStep
+            documentIds={uploadedDocumentIds}
+            onDetectionComplete={handleDetectionComplete}
+          />
+        );
     }
   };
 
@@ -170,6 +225,12 @@ export default function DocumentIngestion() {
         <DocumentReview
           uploadedDocumentIds={uploadedDocumentIds}
           onDetectPII={handleDetectPII}
+        />
+      ) : currentPhase === "detection" ? (
+        /* PII Detection Phase */
+        <DetectionStep
+          documentIds={uploadedDocumentIds}
+          onDetectionComplete={handleDetectionComplete}
         />
       ) : (
         <>

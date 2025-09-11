@@ -159,16 +159,10 @@ export const mockMaskingOptions: MaskingOption[] = [
     example: "john.doe@email.com → *******************",
   },
   {
-    id: "hash",
-    name: "Hashing",
-    description: "Replace with secure hash",
-    example: "john.doe@email.com → hash_a7b3c9d1",
-  },
-  {
-    id: "tokenize",
-    name: "Tokenization",
-    description: "Replace with reversible token",
-    example: "john.doe@email.com → token_x1y2z3a4",
+    id: "pseudo",
+    name: "Pseudonymization",
+    description: "Replace with consistent fake value",
+    example: "john.doe@email.com → user_12345@email.com",
   },
 ];
 

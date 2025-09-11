@@ -100,13 +100,13 @@ class ApiClient {
     const token = getAuthToken();
 
     const config: RequestInit = {
+      ...options,
       headers: {
         "Content-Type": "application/json",
-        ...(token && { Authorization: `Bearer ${token}` }),
         "X-Request-ID": crypto.randomUUID(),
         ...options.headers,
+        ...(token && { Authorization: `Bearer ${token}` }),
       },
-      ...options,
     };
 
     try {
@@ -361,14 +361,80 @@ export const fileApi = {
 };
 
 export const piiApi = {
-  detectPII: (fileId: string) =>
-    apiClient.post<PIIDetectionResult>("/pii/detect", { file_id: fileId }),
+  detectPII: (documentId: string) =>
+    apiClient.post<{
+      document_id: string;
+      document_name: string;
+      total_pii_detected: number;
+      pii_items: Array<{
+        id: string;
+        type: string;
+        text: string;
+        confidence: number;
+        location: string;
+        severity: "low" | "medium" | "high";
+        suggested_strategy: string;
+        coordinates: {
+          page: number;
+          x0: number;
+          y0: number;
+          x1: number;
+          y1: number;
+        };
+      }>;
+      detection_date: string;
+    }>(`/pii/detect/${documentId}`, {}),
 
-  getDetectionResults: (fileId: string) =>
-    apiClient.get<PIIDetectionResult>(`/pii/results/${fileId}`),
+  saveMaskingConfig: (
+    documentId: string,
+    maskingStrategies: Record<string, string>
+  ) =>
+    apiClient.post<{
+      document_id: string;
+      config_content: string;
+      total_items: number;
+    }>(`/pii/save-config/${documentId}`, {
+      masking_strategies: maskingStrategies,
+    }),
 
-  updateDetection: (detectionId: string, updates: any) =>
-    apiClient.put(`/pii/detections/${detectionId}`, updates),
+  getDetectionResults: (documentId: string) =>
+    apiClient.get<{
+      document_id: string;
+      document_name: string;
+      detection_status: string;
+      total_pii_detected: number;
+      pii_items: Array<{
+        id: string;
+        type: string;
+        text: string;
+        confidence: number;
+        location: string;
+        severity: "low" | "medium" | "high";
+        suggested_strategy: string;
+        coordinates: {
+          page: number;
+          x0: number;
+          y0: number;
+          x1: number;
+          y1: number;
+        };
+      }>;
+      detection_date: string;
+    }>(`/pii/results/${documentId}`),
+
+  batchDetectPII: (documentIds: string[]) =>
+    apiClient.post<{
+      results: Array<{
+        document_id: string;
+        document_name: string;
+        total_pii_detected: number;
+        pii_items: Array<any>;
+        detection_date: string;
+      }>;
+      total_processed: number;
+      total_requested: number;
+      errors?: string[];
+    }>("/pii/batch-detect", { document_ids: documentIds }),
 };
 
 export const complianceApi = {
@@ -382,13 +448,40 @@ export const complianceApi = {
 export const maskingApi = {
   getMaskingOptions: () => apiClient.get("/masking/options"),
 
-  applyMasking: (fileId: string, maskingConfig: any) =>
-    apiClient.post("/masking/apply", {
-      file_id: fileId,
-      config: maskingConfig,
-    }),
+  applyMasking: (documentId: string) =>
+    apiClient.post<{
+      original_document_id: string;
+      masked_document_id: string;
+      masked_filename: string;
+      masking_stats: any;
+      total_pii_masked: number;
+      strategies_used: Record<string, number>;
+      masking_date: string;
+    }>(`/masking/apply/${documentId}`, {}),
 
-  getMaskedFile: (fileId: string) => apiClient.get(`/masking/result/${fileId}`),
+  getMaskedFile: (documentId: string) =>
+    apiClient.get(`/masking/download/${documentId}`),
+
+  previewMaskedFile: (documentId: string) =>
+    apiClient.get(`/masking/preview/${documentId}`),
+
+  previewOriginalFile: (documentId: string) =>
+    apiClient.get(`/masking/preview-original/${documentId}`),
+  getMaskingStatus: (documentId: string) =>
+    apiClient.get<{
+      document_id: string;
+      status: string;
+      masked_document_id?: string;
+      masked_filename?: string;
+      masking_date?: string;
+      total_pii_masked: number;
+      strategies_used: Record<string, number>;
+      failed_maskings: number;
+      stats: any;
+    }>(`/masking/status/${documentId}`),
+
+  debugMaskingConfig: (documentId: string) =>
+    apiClient.get(`/masking/debug/${documentId}`),
 };
 
 export const qaApi = {

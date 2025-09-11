@@ -4,10 +4,9 @@ Handles file upload, storage, and retrieval using MongoDB GridFS.
 """
 
 import os
-import uuid
-from typing import List, Dict, Any, Optional
-from flask import Blueprint, request, current_app, make_response, Response
-from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request, decode_token
+from typing import Dict, Any
+from flask import Blueprint, request, current_app, make_response
+from flask_jwt_extended import jwt_required, get_jwt_identity, verify_jwt_in_request
 from werkzeug.utils import secure_filename
 from werkzeug.datastructures import FileStorage
 from utils.responses import success_response, error_response

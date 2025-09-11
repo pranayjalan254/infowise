@@ -1,12 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import {
-  Wand2,
-  CheckSquare,
-  Square,
-  FileText,
-  AlertTriangle,
-} from "lucide-react";
+import { Wand2, CheckSquare, Square, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -20,7 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { documentsApi } from "@/lib/api";
+import { documentsApi, piiApi, maskingApi } from "@/lib/api";
+import { toast } from "@/hooks/use-toast";
 
 interface DocumentData {
   id: string;
@@ -34,6 +29,7 @@ interface DocumentData {
 
 interface MaskingStepProps {
   onMaskPII: () => void;
+  detectedPIIData?: any;
 }
 
 interface MaskingSelection {
@@ -53,16 +49,65 @@ const generateMockPIIForDocument = (
   }));
 };
 
-export function MaskingStep({ onMaskPII }: MaskingStepProps) {
+const convertRealPIIToMaskingFormat = (
+  realPIIData: any,
+  documentId: string,
+  documentName: string
+): PIIDetection[] => {
+  if (!realPIIData?.pii_items) {
+    return [];
+  }
+
+  return realPIIData.pii_items.map((pii: any) => ({
+    id: pii.id, // Use the original ID from backend
+    type: pii.type,
+    confidence: pii.confidence, // Keep as decimal (0.98964 = 98.96%)
+    location: `${documentName}, ${pii.location}`,
+    extractedValue: pii.text,
+    severity: pii.severity || "medium",
+  }));
+};
+
+// Helper function to get PII data for a document (real or mock)
+const getPIIForDocument = (
+  detectedPIIData: any,
+  documentId: string,
+  documentName: string
+): PIIDetection[] => {
+  return detectedPIIData
+    ? convertRealPIIToMaskingFormat(detectedPIIData, documentId, documentName)
+    : generateMockPIIForDocument(documentId, documentName);
+};
+
+// Helper function to group PII items by type
+const groupPIIByType = (
+  allPII: PIIDetection[]
+): Record<string, PIIDetection[]> => {
+  return allPII.reduce((groups, pii) => {
+    const type = pii.type;
+    if (!groups[type]) {
+      groups[type] = [];
+    }
+    groups[type].push(pii);
+    return groups;
+  }, {} as Record<string, PIIDetection[]>);
+};
+
+export function MaskingStep({ onMaskPII, detectedPIIData }: MaskingStepProps) {
   const [documents, setDocuments] = useState<DocumentData[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedMaskingOptions, setSelectedMaskingOptions] =
     useState<MaskingSelection>({});
   const [selectedItems, setSelectedItems] = useState<{
-    [documentId: string]: string[];
+    [piiType: string]: string[];
   }>({});
-  const [activeDocument, setActiveDocument] = useState<string>("");
+  const [activePIIType, setActivePIIType] = useState<string>("");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [configSaved, setConfigSaved] = useState(false);
+  const [allPII, setAllPII] = useState<PIIDetection[]>([]);
+  const [piiByType, setPiiByType] = useState<Record<string, PIIDetection[]>>(
+    {}
+  );
 
   useEffect(() => {
     const fetchDocuments = async () => {
@@ -72,9 +117,25 @@ export function MaskingStep({ onMaskPII }: MaskingStepProps) {
         const docs = response.data?.documents || [];
         setDocuments(docs);
 
-        // Set active document to first one
-        if (docs.length > 0) {
-          setActiveDocument(docs[0].id);
+        // Aggregate all PII from all documents
+        let allPIIItems: PIIDetection[] = [];
+        docs.forEach((doc) => {
+          const documentPII = getPIIForDocument(
+            detectedPIIData,
+            doc.id,
+            doc.name
+          );
+          allPIIItems = [...allPIIItems, ...documentPII];
+        });
+
+        setAllPII(allPIIItems);
+        const groupedPII = groupPIIByType(allPIIItems);
+        setPiiByType(groupedPII);
+
+        // Set active PII type to first one
+        const firstType = Object.keys(groupedPII)[0];
+        if (firstType) {
+          setActivePIIType(firstType);
         }
       } catch (error) {
         console.error("Failed to fetch documents:", error);
@@ -84,24 +145,17 @@ export function MaskingStep({ onMaskPII }: MaskingStepProps) {
     };
 
     fetchDocuments();
-  }, []);
+  }, [detectedPIIData]);
 
   useEffect(() => {
-    if (documents.length > 0) {
+    if (allPII.length > 0) {
       const defaultMaskingOptions: MaskingSelection = {};
-      documents.forEach((doc) => {
-        const documentPII = generateMockPIIForDocument(doc.id, doc.name);
-        documentPII.forEach((pii) => {
-          defaultMaskingOptions[pii.id] = "redact";
-        });
+      allPII.forEach((pii) => {
+        defaultMaskingOptions[pii.id] = "redact"; // Default to redact strategy
       });
       setSelectedMaskingOptions(defaultMaskingOptions);
-
-      if (!activeDocument && documents[0]) {
-        setActiveDocument(documents[0].id);
-      }
     }
-  }, [documents, activeDocument]);
+  }, [allPII]);
 
   const handleMaskingOptionChange = (piiId: string, optionId: string) => {
     setSelectedMaskingOptions((prev) => ({
@@ -110,36 +164,77 @@ export function MaskingStep({ onMaskPII }: MaskingStepProps) {
     }));
   };
 
-  const handleItemSelect = (documentId: string, piiId: string) => {
+  const handleItemSelect = (piiType: string, piiId: string) => {
     setSelectedItems((prev) => ({
       ...prev,
-      [documentId]: prev[documentId]?.includes(piiId)
-        ? prev[documentId].filter((id) => id !== piiId)
-        : [...(prev[documentId] || []), piiId],
+      [piiType]: prev[piiType]?.includes(piiId)
+        ? prev[piiType].filter((id) => id !== piiId)
+        : [...(prev[piiType] || []), piiId],
     }));
   };
+  const handleApplyMasking = async () => {
+    setIsProcessing(true);
+    try {
+      // Get the current document ID (assuming single document for now)
+      const documentId = documents[0]?.id;
+      if (!documentId) {
+        throw new Error("No document found");
+      }
 
-  const handleSelectAllForDocument = (documentId: string) => {
-    const documentPII = generateMockPIIForDocument(
-      documentId,
-      documents.find((doc) => doc.id === documentId)?.name || ""
-    );
-    const currentlySelected = selectedItems[documentId] || [];
+      // Save masking configuration to backend first
+      const configResponse = await piiApi.saveMaskingConfig(
+        documentId,
+        selectedMaskingOptions
+      );
+
+      if (configResponse.status === "success") {
+        console.log("Masking configuration saved:", configResponse.data);
+        setConfigSaved(true);
+
+        // Now apply the actual masking
+        const maskingResponse = await maskingApi.applyMasking(documentId);
+
+        if (maskingResponse.status === "success") {
+          console.log("Masking applied successfully:", maskingResponse.data);
+          toast({
+            title: "Masking Applied Successfully",
+            description: `Masked ${maskingResponse.data?.total_pii_masked} PII items using various strategies`,
+          });
+
+          // Move to next step
+          onMaskPII();
+        }
+      }
+    } catch (error) {
+      console.error("Failed to apply masking:", error);
+      toast({
+        title: "Masking Failed",
+        description: "Failed to apply PII masking. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleSelectAllForType = (piiType: string) => {
+    const typeItems = piiByType[piiType] || [];
+    const currentlySelected = selectedItems[piiType] || [];
 
     setSelectedItems((prev) => ({
       ...prev,
-      [documentId]:
-        currentlySelected.length === documentPII.length
+      [piiType]:
+        currentlySelected.length === typeItems.length
           ? []
-          : documentPII.map((item) => item.id),
+          : typeItems.map((item) => item.id),
     }));
   };
 
-  const applyBatchMasking = (documentId: string, optionId: string) => {
-    const selectedForDoc = selectedItems[documentId] || [];
+  const applyBatchMasking = (piiType: string, optionId: string) => {
+    const selectedForType = selectedItems[piiType] || [];
     const updates: MaskingSelection = {};
-    selectedForDoc.forEach((itemId) => {
-      updates[itemId] = optionId;
+    selectedForType.forEach((piiId) => {
+      updates[piiId] = optionId;
     });
     setSelectedMaskingOptions((prev) => ({ ...prev, ...updates }));
   };
@@ -175,56 +270,46 @@ export function MaskingStep({ onMaskPII }: MaskingStepProps) {
       >
         <Card className="border-0 shadow-none bg-transparent">
           <CardHeader className="px-0 pb-4">
-            <CardTitle className="flex items-center">
-              <AlertTriangle size={20} className="mr-2 text-warning" />
-              Detected PII by Document
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center">
+                <AlertTriangle size={20} className="mr-2 text-warning" />
+                Detected PII by Type
+              </CardTitle>
+            </div>
           </CardHeader>
           <CardContent className="px-0">
-            <Tabs value={activeDocument} onValueChange={setActiveDocument}>
+            <Tabs value={activePIIType} onValueChange={setActivePIIType}>
               <TabsList
                 className={`grid w-full mb-6 ${
-                  documents.length <= 2
+                  Object.keys(piiByType).length <= 2
                     ? "grid-cols-2"
-                    : documents.length <= 3
+                    : Object.keys(piiByType).length <= 3
                     ? "grid-cols-3"
                     : "grid-cols-4"
                 }`}
               >
-                {documents.slice(0, 4).map((doc) => {
-                  const documentPII = generateMockPIIForDocument(
-                    doc.id,
-                    doc.name
-                  );
-                  return (
+                {Object.entries(piiByType)
+                  .slice(0, 4)
+                  .map(([type, items]) => (
                     <TabsTrigger
-                      key={doc.id}
-                      value={doc.id}
+                      key={type}
+                      value={type}
                       className="flex items-center space-x-2 text-xs"
                     >
-                      <FileText size={14} />
-                      <span className="truncate max-w-[100px]">
-                        {doc.name.length > 15
-                          ? `${doc.name.substring(0, 15)}...`
-                          : doc.name}
-                      </span>
+                      <AlertTriangle size={14} />
+                      <span className="truncate max-w-[100px]">{type}</span>
                       <Badge variant="secondary" className="text-xs">
-                        {documentPII.length}
+                        {items.length}
                       </Badge>
                     </TabsTrigger>
-                  );
-                })}
+                  ))}
               </TabsList>
 
-              {documents.map((doc) => {
-                const documentPII = generateMockPIIForDocument(
-                  doc.id,
-                  doc.name
-                );
-                const selectedForDoc = selectedItems[doc.id] || [];
+              {Object.entries(piiByType).map(([type, items]) => {
+                const selectedForType = selectedItems[type] || [];
 
                 return (
-                  <TabsContent key={doc.id} value={doc.id} className="mt-0">
+                  <TabsContent key={type} value={type} className="mt-0">
                     {/* Batch Actions */}
                     <div className="neumorphic-flat p-4 rounded-xl mb-6">
                       <div className="flex items-center justify-between mb-3">
@@ -232,26 +317,25 @@ export function MaskingStep({ onMaskPII }: MaskingStepProps) {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => handleSelectAllForDocument(doc.id)}
+                            onClick={() => handleSelectAllForType(type)}
                             className="neumorphic-button"
                           >
-                            {selectedForDoc.length === documentPII.length ? (
+                            {selectedForType.length === items.length ? (
                               <CheckSquare size={16} className="mr-2" />
                             ) : (
                               <Square size={16} className="mr-2" />
                             )}
-                            {selectedForDoc.length === documentPII.length
+                            {selectedForType.length === items.length
                               ? "Deselect All"
                               : "Select All"}
                           </Button>
                           <span className="text-sm text-muted-foreground">
-                            {selectedForDoc.length} of {documentPII.length}{" "}
-                            selected
+                            {selectedForType.length} of {items.length} selected
                           </span>
                         </div>
                       </div>
 
-                      {selectedForDoc.length > 0 && (
+                      {selectedForType.length > 0 && (
                         <div className="flex items-center space-x-2">
                           <span className="text-sm font-medium">
                             Apply to selected:
@@ -263,7 +347,7 @@ export function MaskingStep({ onMaskPII }: MaskingStepProps) {
                                 variant="outline"
                                 size="sm"
                                 onClick={() =>
-                                  applyBatchMasking(doc.id, option.id)
+                                  applyBatchMasking(type, option.id)
                                 }
                                 className="neumorphic-button text-xs"
                               >
@@ -278,8 +362,8 @@ export function MaskingStep({ onMaskPII }: MaskingStepProps) {
 
                     {/* PII Items List */}
                     <div className="space-y-4 max-h-[600px] overflow-y-auto">
-                      {documentPII.map((detection) => {
-                        const isSelected = selectedForDoc.includes(
+                      {items.map((detection) => {
+                        const isSelected = selectedForType.includes(
                           detection.id
                         );
                         const maskingOption =
@@ -300,7 +384,7 @@ export function MaskingStep({ onMaskPII }: MaskingStepProps) {
                                 variant="ghost"
                                 size="sm"
                                 onClick={() =>
-                                  handleItemSelect(doc.id, detection.id)
+                                  handleItemSelect(type, detection.id)
                                 }
                                 className="p-1 h-auto mt-1"
                               >
@@ -409,6 +493,82 @@ export function MaskingStep({ onMaskPII }: MaskingStepProps) {
                 );
               })}
             </Tabs>
+          </CardContent>
+        </Card>
+      </motion.div>
+
+      {/* Apply Masking Section */}
+      <motion.div
+        className="neumorphic-card p-6"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, delay: 0.2 }}
+      >
+        <Card className="border-0 shadow-none bg-transparent">
+          <CardHeader className="px-0 pb-4">
+            <CardTitle className="flex items-center">
+              <Wand2 size={20} className="mr-2 text-primary" />
+              Apply PII Masking
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-0">
+            <div className="space-y-4">
+              <div className="neumorphic-flat p-4 rounded-xl">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">
+                      Ready to apply masking strategies
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      This will create a masked version of your document with
+                      the selected strategies applied
+                    </p>
+                  </div>
+                  <Button
+                    onClick={handleApplyMasking}
+                    disabled={isProcessing || allPII.length === 0}
+                    className="neumorphic-button"
+                  >
+                    {isProcessing ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                        Processing...
+                      </>
+                    ) : (
+                      <>
+                        <Wand2 size={16} className="mr-2" />
+                        Apply Masking
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Masking Summary */}
+              {Object.keys(selectedMaskingOptions).length > 0 && (
+                <div className="neumorphic-flat p-4 rounded-xl">
+                  <h4 className="text-sm font-medium mb-3">Masking Summary</h4>
+                  <div className="grid grid-cols-3 gap-4 text-xs">
+                    {Object.entries(
+                      Object.values(selectedMaskingOptions).reduce(
+                        (acc, strategy) => {
+                          acc[strategy] = (acc[strategy] || 0) + 1;
+                          return acc;
+                        },
+                        {} as Record<string, number>
+                      )
+                    ).map(([strategy, count]) => (
+                      <div key={strategy} className="text-center">
+                        <div className="font-medium text-primary">{count}</div>
+                        <div className="text-muted-foreground capitalize">
+                          {strategy}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
       </motion.div>
