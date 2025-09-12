@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,6 +62,7 @@ export default function Dashboard() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [stats, setStats] = useState<DocumentStats | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [activeTab, setActiveTab] = useState("uploaded");
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -143,10 +145,34 @@ export default function Dashboard() {
     }
   };
 
-  const filteredDocuments = documents.filter((doc) =>
-    doc.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Filter documents based on search term and active tab
+  const filteredDocuments = documents.filter((doc) => {
+    const matchesSearch = doc.name
+      .toLowerCase()
+      .includes(searchTerm.toLowerCase());
+    const matchesTab = doc.status.toLowerCase() === activeTab.toLowerCase();
+    return matchesSearch && matchesTab;
+  });
 
+  // Get document counts by status
+  const getDocumentCountsByStatus = () => {
+    const counts = {
+      uploaded: 0,
+      masked: 0,
+      failed: 0,
+    };
+
+    documents.forEach((doc) => {
+      const status = doc.status.toLowerCase();
+      if (status === "uploaded") counts.uploaded++;
+      else if (status === "masked") counts.masked++;
+      else if (status === "failed") counts.failed++;
+    });
+
+    return counts;
+  };
+
+  const documentCounts = getDocumentCountsByStatus();
   const recentDocuments = filteredDocuments.slice(0, 6); // Show only 6 recent documents
   return (
     <div className="space-y-6">
@@ -254,120 +280,142 @@ export default function Dashboard() {
           </CardHeader>
 
           <CardContent>
-            {loading ? (
-              <div className="flex items-center justify-center h-32">
-                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
-              </div>
-            ) : recentDocuments.length === 0 ? (
-              <div className="text-center py-12">
-                <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-foreground mb-2">
-                  {documents.length === 0
-                    ? "No documents uploaded"
-                    : "No documents found"}
-                </h3>
-                <p className="text-muted-foreground mb-4">
-                  {documents.length === 0
-                    ? "Upload your first document to get started"
-                    : "Try adjusting your search criteria"}
-                </p>
-                {documents.length === 0 && (
-                  <Button
-                    onClick={() => navigate("/ingestion")}
-                    className="neumorphic-button"
-                  >
-                    <Upload className="w-4 h-4 mr-2" />
-                    Upload Documents
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {recentDocuments.map((document, index) => (
-                  <motion.div
-                    key={document.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ duration: 0.3, delay: index * 0.05 }}
-                    className="flex items-center justify-between p-4 neumorphic-flat rounded-lg hover:neumorphic-hover transition-all duration-200"
-                  >
-                    <div className="flex items-center space-x-4 flex-1">
-                      <div className="flex-shrink-0">
-                        <div className="w-10 h-10 neumorphic-flat rounded-lg flex items-center justify-center">
-                          <FileText className="w-5 h-5 text-blue-500" />
+            <Tabs
+              value={activeTab}
+              onValueChange={setActiveTab}
+              className="w-full"
+            >
+              <TabsList className="grid grid-cols-5 w-full mb-6">
+                <TabsTrigger value="uploaded" className="text-sm">
+                  Uploaded ({documentCounts.uploaded})
+                </TabsTrigger>
+                <TabsTrigger value="masked" className="text-sm">
+                  Masked ({documentCounts.masked})
+                </TabsTrigger>
+                <TabsTrigger value="failed" className="text-sm">
+                  Failed ({documentCounts.failed})
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value={activeTab} className="mt-0">
+                {loading ? (
+                  <div className="flex items-center justify-center h-32">
+                    <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                ) : recentDocuments.length === 0 ? (
+                  <div className="text-center py-12">
+                    <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-foreground mb-2">
+                      {documents.length === 0
+                        ? "No documents uploaded"
+                        : activeTab === "all"
+                        ? "No documents found"
+                        : `No ${activeTab} documents found`}
+                    </h3>
+                    <p className="text-muted-foreground mb-4">
+                      {documents.length === 0
+                        ? "Upload your first document to get started"
+                        : "Try adjusting your search criteria or switching tabs"}
+                    </p>
+                    {documents.length === 0 && (
+                      <Button
+                        onClick={() => navigate("/ingestion")}
+                        className="neumorphic-button"
+                      >
+                        <Upload className="w-4 h-4 mr-2" />
+                        Upload Documents
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {recentDocuments.map((document, index) => (
+                      <motion.div
+                        key={document.id}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ duration: 0.3, delay: index * 0.05 }}
+                        className="flex items-center justify-between p-4 neumorphic-flat rounded-lg hover:neumorphic-hover transition-all duration-200"
+                      >
+                        <div className="flex items-center space-x-4 flex-1">
+                          <div className="flex-shrink-0">
+                            <div className="w-10 h-10 neumorphic-flat rounded-lg flex items-center justify-center">
+                              <FileText className="w-5 h-5 text-blue-500" />
+                            </div>
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <h4 className="text-sm font-medium text-foreground truncate">
+                              {document.name}
+                            </h4>
+                            <div className="flex items-center space-x-4 mt-1">
+                              <span className="text-xs text-muted-foreground">
+                                {formatFileSize(document.size)}
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                {formatDate(document.upload_date)}
+                              </span>
+                              <Badge
+                                className={`${getStatusColor(
+                                  document.status
+                                )} text-xs`}
+                              >
+                                {document.status}
+                              </Badge>
+                            </div>
+                          </div>
                         </div>
-                      </div>
 
-                      <div className="flex-1 min-w-0">
-                        <h4 className="text-sm font-medium text-foreground truncate">
-                          {document.name}
-                        </h4>
-                        <div className="flex items-center space-x-4 mt-1">
-                          <span className="text-xs text-muted-foreground">
-                            {formatFileSize(document.size)}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            {formatDate(document.upload_date)}
-                          </span>
-                          <Badge
-                            className={`${getStatusColor(
-                              document.status
-                            )} text-xs`}
-                          >
-                            {document.status}
-                          </Badge>
+                        <div className="flex items-center space-x-2">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                              >
+                                <MoreVertical className="w-4 h-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem>
+                                <Eye className="w-4 h-4 mr-2" />
+                                View Details
+                              </DropdownMenuItem>
+                              <DropdownMenuItem>
+                                <Download className="w-4 h-4 mr-2" />
+                                Download
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="text-red-600"
+                                onClick={() =>
+                                  handleDelete(document.id, document.name)
+                                }
+                              >
+                                <Trash2 className="w-4 h-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
+                      </motion.div>
+                    ))}
+
+                    {filteredDocuments.length > 6 && (
+                      <div className="text-center pt-4">
+                        <Button
+                          variant="outline"
+                          onClick={() => navigate("/ingestion")}
+                          className="neumorphic-button"
+                        >
+                          View All {filteredDocuments.length} Documents
+                        </Button>
                       </div>
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0"
-                          >
-                            <MoreVertical className="w-4 h-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem>
-                            <Eye className="w-4 h-4 mr-2" />
-                            View Details
-                          </DropdownMenuItem>
-                          <DropdownMenuItem>
-                            <Download className="w-4 h-4 mr-2" />
-                            Download
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            className="text-red-600"
-                            onClick={() =>
-                              handleDelete(document.id, document.name)
-                            }
-                          >
-                            <Trash2 className="w-4 h-4 mr-2" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </motion.div>
-                ))}
-
-                {filteredDocuments.length > 6 && (
-                  <div className="text-center pt-4">
-                    <Button
-                      variant="outline"
-                      onClick={() => navigate("/ingestion")}
-                      className="neumorphic-button"
-                    >
-                      View All {filteredDocuments.length} Documents
-                    </Button>
+                    )}
                   </div>
                 )}
-              </div>
-            )}
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
       </motion.div>

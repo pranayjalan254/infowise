@@ -7,10 +7,15 @@ import {
   AlertTriangle,
   Loader2,
   RefreshCw,
+  ChevronRight,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  StreamingProgress,
+  useStreamingProgress,
+} from "@/components/ui/streaming-progress";
 import { piiApi } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -53,12 +58,16 @@ export function DetectionStep({
   const [piiDetections, setPiiDetections] = useState<PIIItem[]>([]);
   const [isDetecting, setIsDetecting] = useState(false);
   const [hasDetectionRun, setHasDetectionRun] = useState(false);
+  const [detectedPIIData, setDetectedPIIData] = useState<any>(null);
   const [detectionStats, setDetectionStats] = useState<{
     totalDocuments: number;
     totalPII: number;
     documentName?: string;
+    totalPages?: number;
   } | null>(null);
   const { toast } = useToast();
+  const { addPageProgress, setCurrentProcessingPage, markComplete } =
+    useStreamingProgress();
 
   // Run PII detection when component mounts or document IDs change
   useEffect(() => {
@@ -80,52 +89,193 @@ export function DetectionStep({
     setIsDetecting(true);
     try {
       if (documentIds.length === 1) {
-        // Single document detection
-        const response = await piiApi.detectPII(documentIds[0]);
-        if (response.status === "success" && response.data) {
-          setPiiDetections(response.data.pii_items);
-          setDetectionStats({
-            totalDocuments: 1,
-            totalPII: response.data.total_pii_detected,
-            documentName: response.data.document_name,
-          });
-          setHasDetectionRun(true);
+        // Single document detection with streaming
+        const eventSource = piiApi.detectPIIStream(
+          documentIds[0],
+          (event) => {
+            switch (event.type) {
+              case "status":
+                // Initial status messages
+                break;
 
-          if (onDetectionComplete) {
-            onDetectionComplete(response.data);
+              case "info":
+                if (event.total_pages) {
+                  setDetectionStats((prev) => ({
+                    ...prev,
+                    totalPages: event.total_pages,
+                    totalDocuments: 1,
+                    totalPII: 0,
+                  }));
+                }
+                break;
+
+              case "progress":
+                // Page processing started
+                if (event.page) {
+                  setCurrentProcessingPage(event.page);
+                }
+                break;
+
+              case "page_complete":
+                // Page processing completed
+                if (event.page && event.message) {
+                  addPageProgress({
+                    page: event.page,
+                    message: event.message,
+                    piiCount: event.pii_count || 0,
+                    totalFound: event.total_found,
+                  });
+                }
+                break;
+
+              case "complete":
+                // Detection completed
+                if (event.result) {
+                  console.log(
+                    "Detection complete, setting results:",
+                    event.result
+                  );
+
+                  // Set the detection results first
+                  setPiiDetections(event.result.pii_items);
+                  setDetectionStats((prev) => ({
+                    totalDocuments: 1,
+                    totalPII: event.result.total_pii_detected,
+                    documentName: event.result.document_name,
+                    totalPages: prev?.totalPages || 0,
+                  }));
+
+                  // Mark detection as completed
+                  setHasDetectionRun(true);
+                  markComplete();
+
+                  // Show success toast
+                  toast({
+                    title: "PII Detection Complete",
+                    description: `Found ${event.result.total_pii_detected} PII items in ${event.result.document_name}. Review the results below.`,
+                  });
+
+                  // Set detecting to false to show results
+                  console.log("Setting isDetecting to false - showing results");
+                  setIsDetecting(false);
+
+                  // Store the results for later callback when user chooses to proceed
+                  setDetectedPIIData(event.result);
+                } else {
+                  console.error("No result data in complete event");
+                  setIsDetecting(false);
+                }
+                break;
+
+              case "error":
+                console.error("PII detection error:", event.message);
+                toast({
+                  title: "Detection Failed",
+                  description: event.message,
+                  variant: "destructive",
+                });
+                console.log("Setting isDetecting to false due to error");
+                setIsDetecting(false);
+                break;
+            }
+          },
+          (error) => {
+            console.error("Streaming error:", error);
+            toast({
+              title: "Connection Error",
+              description: "Lost connection during detection",
+              variant: "destructive",
+            });
+            setIsDetecting(false);
           }
-
-          toast({
-            title: "PII Detection Complete",
-            description: `Found ${response.data.total_pii_detected} PII items in ${response.data.document_name}`,
-          });
-        }
+        );
       } else {
-        // Batch detection for multiple documents
-        const response = await piiApi.batchDetectPII(documentIds);
-        if (response.status === "success" && response.data) {
-          // Combine all PII items from all documents
-          const allPiiItems: PIIItem[] = [];
-          response.data.results.forEach((result) => {
-            allPiiItems.push(...result.pii_items);
-          });
+        // Batch detection for multiple documents with streaming
+        const streamController = piiApi.batchDetectPIIStream(
+          documentIds,
+          (event) => {
+            switch (event.type) {
+              case "batch_start":
+                setDetectionStats({
+                  totalDocuments: event.total_documents,
+                  totalPII: 0,
+                });
+                break;
 
-          setPiiDetections(allPiiItems);
-          setDetectionStats({
-            totalDocuments: response.data.total_processed,
-            totalPII: allPiiItems.length,
-          });
-          setHasDetectionRun(true);
+              case "document_start":
+                // New document started
+                break;
 
-          if (onDetectionComplete) {
-            onDetectionComplete(response.data);
+              case "progress":
+                if (event.page) {
+                  setCurrentProcessingPage(event.page);
+                }
+                break;
+
+              case "page_complete":
+                if (event.page && event.message) {
+                  addPageProgress({
+                    page: event.page,
+                    message: event.message,
+                    piiCount: event.pii_count || 0,
+                    totalFound: event.total_found,
+                  });
+                }
+                break;
+
+              case "complete":
+                // Individual document completed
+                if (event.result) {
+                  setPiiDetections((prev) => [
+                    ...prev,
+                    ...event.result.pii_items,
+                  ]);
+                }
+                break;
+
+              case "batch_complete":
+                setHasDetectionRun(true);
+                markComplete();
+                setIsDetecting(false);
+
+                toast({
+                  title: "Batch PII Detection Complete",
+                  description: `Processed ${
+                    detectionStats?.totalDocuments || 0
+                  } documents. Review the results below.`,
+                });
+
+                // Store results for later callback
+                if (piiDetections.length > 0) {
+                  setDetectedPIIData({
+                    pii_items: piiDetections,
+                    total_pii_detected: piiDetections.length,
+                    detection_date: new Date().toISOString(),
+                  });
+                }
+                break;
+
+              case "error":
+                console.error("Batch PII detection error:", event.message);
+                toast({
+                  title: "Detection Failed",
+                  description: event.message,
+                  variant: "destructive",
+                });
+                setIsDetecting(false);
+                break;
+            }
+          },
+          (error) => {
+            console.error("Batch streaming error:", error);
+            toast({
+              title: "Connection Error",
+              description: "Lost connection during batch detection",
+              variant: "destructive",
+            });
+            setIsDetecting(false);
           }
-
-          toast({
-            title: "Batch PII Detection Complete",
-            description: `Found ${allPiiItems.length} PII items across ${response.data.total_processed} documents`,
-          });
-        }
+        );
       }
     } catch (error) {
       console.error("PII detection failed:", error);
@@ -135,7 +285,6 @@ export function DetectionStep({
           error instanceof Error ? error.message : "Failed to detect PII",
         variant: "destructive",
       });
-    } finally {
       setIsDetecting(false);
     }
   };
@@ -149,6 +298,15 @@ export function DetectionStep({
       severityFilter === "all" || detection.severity === severityFilter;
 
     return matchesSearch && matchesType && matchesSeverity;
+  });
+
+  // Debug logging
+  console.log("DetectionStep state:", {
+    isDetecting,
+    hasDetectionRun,
+    piiDetectionsCount: piiDetections.length,
+    detectionStats,
+    hasDetectedPIIData: !!detectedPIIData,
   });
 
   const getSeverityColor = (severity: PIIItem["severity"]) => {
@@ -173,29 +331,26 @@ export function DetectionStep({
     return types.sort();
   };
 
+  // Add render path debugging
   if (isDetecting) {
+    console.log("Rendering: StreamingProgress");
     return (
       <motion.div
-        className="flex flex-col items-center justify-center py-12 space-y-4"
+        className="space-y-6"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
       >
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-        <h3 className="text-lg font-semibold text-foreground">
-          Detecting PII...
-        </h3>
-        <p className="text-muted-foreground text-center max-w-md">
-          Our AI agent is analyzing your{" "}
-          {documentIds.length === 1
-            ? "document"
-            : `${documentIds.length} documents`}{" "}
-          to identify personally identifiable information.
-        </p>
+        <StreamingProgress
+          documentName={detectionStats?.documentName}
+          totalPages={detectionStats?.totalPages}
+          className="max-w-2xl mx-auto"
+        />
       </motion.div>
     );
   }
 
-  if (!hasDetectionRun) {
+  if (!hasDetectionRun && piiDetections.length === 0) {
+    console.log("Rendering: Start Detection Button");
     return (
       <motion.div
         className="flex flex-col items-center justify-center py-12 space-y-4"
@@ -217,6 +372,8 @@ export function DetectionStep({
       </motion.div>
     );
   }
+
+  console.log("Rendering: Detection Results");
 
   return (
     <motion.div
@@ -251,10 +408,20 @@ export function DetectionStep({
               <RefreshCw size={16} className="mr-2" />
               Re-detect
             </Button>
-            <Button className="neumorphic-button">
+            <Button className="neumorphic-button" size="sm">
               <Eye size={16} className="mr-2" />
               View Documents
             </Button>
+            {detectedPIIData && onDetectionComplete && (
+              <Button
+                onClick={() => onDetectionComplete(detectedPIIData)}
+                className="neumorphic-button bg-primary text-primary-foreground hover:bg-primary/90"
+                size="sm"
+              >
+                Proceed to Masking
+                <ChevronRight size={16} className="ml-2" />
+              </Button>
+            )}
           </div>
         </div>
 

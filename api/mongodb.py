@@ -353,6 +353,13 @@ class MongoDatabase:
             }
 
 
+    def get_database(self):
+        """Get the raw database instance for custom collections."""
+        if self._db is None:
+            raise RuntimeError("MongoDB not properly initialized")
+        return self._db
+
+
 # Global MongoDB instance
 mongo_db = MongoDatabase()
 

@@ -77,11 +77,11 @@ class PIIDetectionService:
                         'type': pii.pii_type,  # Use pii_type instead of label
                         'text': pii.text,
                         'confidence': float(pii.confidence),  # Use confidence instead of score
-                        'location': f"Page {pii.page_num}",
+                        'location': f"Page {pii.page_num + 1}",  # Display as 1-based for user
                         'severity': 'high' if float(pii.confidence) > 0.9 else 'medium' if float(pii.confidence) > 0.7 else 'low',
                         'suggested_strategy': pii.suggested_strategy,  # Use the actual suggested strategy
                         'coordinates': {
-                            'page': int(pii.page_num),  # Ensure int
+                            'page': int(pii.page_num),  # Store as 0-based for internal use
                             'x0': float(pii.x0),  # Convert numpy types to Python types
                             'y0': float(pii.y0),
                             'x1': float(pii.x1),

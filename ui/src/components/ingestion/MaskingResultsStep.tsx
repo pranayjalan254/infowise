@@ -11,7 +11,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { documentsApi, maskingApi } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 
@@ -33,16 +32,11 @@ interface MaskingResultsStepProps {
 
 export function MaskingResultsStep({
   onComplete,
-  detectedPIIData,
   documentId,
 }: MaskingResultsStepProps) {
-  const [documents, setDocuments] = useState<DocumentData[]>([]);
   const [loading, setLoading] = useState(true);
   const [maskingStatus, setMaskingStatus] = useState<any>(null);
   const [isDownloading, setIsDownloading] = useState(false);
-  const [activeView, setActiveView] = useState<
-    "comparison" | "original" | "masked"
-  >("comparison");
 
   useEffect(() => {
     const fetchMaskingStatus = async () => {
@@ -101,11 +95,6 @@ export function MaskingResultsStep({
     }
   };
 
-  const handlePreview = async () => {
-    if (!documents[0]) return;
-    setActiveView("comparison");
-  };
-
   if (loading) {
     return (
       <div className="space-y-6">
@@ -155,315 +144,183 @@ export function MaskingResultsStep({
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.3, delay: 0.1 }}
         >
-          <Card className="border-0 shadow-none bg-transparent">
-            <CardHeader className="px-0 pb-4">
-              <CardTitle className="flex items-center">
-                <Shield size={20} className="mr-2 text-primary" />
-                Masking Summary
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-0">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Total Masked Items */}
-                <div className="neumorphic-flat p-4 rounded-xl text-center">
-                  <div className="text-3xl font-bold text-primary mb-2">
-                    {maskingStatus.total_pii_masked}
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    PII Items Masked
-                  </div>
-                </div>
+          {/* Header with Download Button */}
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <Shield size={20} className="text-primary" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">
+                  Masking Complete
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  {maskingStatus?.masked_filename ||
+                    "Document successfully processed"}
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={handleDownload}
+              disabled={isDownloading}
+              className="neumorphic-button bg-primary text-primary-foreground hover:bg-primary/90"
+              size="lg"
+            >
+              {isDownloading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                  Downloading...
+                </>
+              ) : (
+                <>
+                  <Download size={18} className="mr-2" />
+                  Download Masked PDF
+                </>
+              )}
+            </Button>
+          </div>
 
-                {/* Strategies Used */}
-                <div className="neumorphic-flat p-4 rounded-xl">
-                  <h4 className="text-sm font-medium mb-3">
-                    Strategies Applied
-                  </h4>
-                  <div className="space-y-2">
-                    {Object.entries(maskingStatus.strategies_used || {}).map(
-                      ([strategy, count]) => (
-                        <div
-                          key={strategy}
-                          className="flex justify-between items-center"
+          {/* Stats Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Total Masked Items */}
+            <div className="neumorphic-flat p-6 rounded-xl text-center group hover:shadow-lg transition-all duration-300">
+              <div className="text-4xl font-bold text-primary mb-2 group-hover:scale-110 transition-transform">
+                {maskingStatus.total_pii_masked}
+              </div>
+              <div className="text-sm font-medium text-muted-foreground">
+                Items Protected
+              </div>
+            </div>
+
+            {/* Strategies Used */}
+            <div className="neumorphic-flat p-6 rounded-xl">
+              <h4 className="text-sm font-semibold mb-3 text-foreground">
+                Protection Methods
+              </h4>
+              <div className="space-y-2">
+                {Object.entries(maskingStatus.strategies_used || {}).length >
+                0 ? (
+                  Object.entries(maskingStatus.strategies_used || {}).map(
+                    ([strategy, count]) => (
+                      <div
+                        key={strategy}
+                        className="flex justify-between items-center py-1"
+                      >
+                        <Badge
+                          variant="secondary"
+                          className="capitalize text-xs bg-primary/10 text-primary hover:bg-primary/20"
                         >
-                          <Badge variant="outline" className="capitalize">
-                            {strategy}
-                          </Badge>
-                          <span className="text-sm font-medium">
-                            {count as number}
-                          </span>
-                        </div>
-                      )
-                    )}
-                  </div>
-                </div>
-
-                {/* Processing Stats */}
-                <div className="neumorphic-flat p-4 rounded-xl">
-                  <h4 className="text-sm font-medium mb-3">
-                    Processing Details
-                  </h4>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">
-                        Success Rate
-                      </span>
-                      <span className="font-medium text-green-600">
-                        {maskingStatus.failed_maskings === 0
-                          ? "100%"
-                          : `${Math.round(
-                              (maskingStatus.total_pii_masked /
-                                (maskingStatus.total_pii_masked +
-                                  maskingStatus.failed_maskings)) *
-                                100
-                            )}%`}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">
-                        Processed Date
-                      </span>
-                      <span className="font-medium">
-                        {new Date(
-                          maskingStatus.masking_date
-                        ).toLocaleDateString()}
-                      </span>
-                    </div>
-                    {maskingStatus.failed_maskings > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">
-                          Failed Items
-                        </span>
-                        <span className="font-medium text-orange-600">
-                          {maskingStatus.failed_maskings}
+                          {strategy}
+                        </Badge>
+                        <span className="text-sm font-semibold text-foreground">
+                          {count as number}
                         </span>
                       </div>
-                    )}
+                    )
+                  )
+                ) : (
+                  <div className="text-sm text-muted-foreground text-center py-2">
+                    No strategies applied
                   </div>
+                )}
+              </div>
+            </div>
+
+            {/* Success Rate */}
+            <div className="neumorphic-flat p-6 rounded-xl">
+              <h4 className="text-sm font-semibold mb-3 text-foreground">
+                Success Rate
+              </h4>
+              <div className="text-center">
+                <div
+                  className={`text-3xl font-bold mb-2 ${
+                    maskingStatus.failed_maskings === 0
+                      ? "text-green-500"
+                      : maskingStatus.total_pii_masked >
+                        maskingStatus.failed_maskings
+                      ? "text-yellow-500"
+                      : "text-red-500"
+                  }`}
+                >
+                  {maskingStatus.failed_maskings === 0
+                    ? "100%"
+                    : `${Math.round(
+                        (maskingStatus.total_pii_masked /
+                          (maskingStatus.total_pii_masked +
+                            maskingStatus.failed_maskings)) *
+                          100
+                      )}%`}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {maskingStatus.failed_maskings > 0 ? (
+                    <span className="text-orange-600">
+                      {maskingStatus.failed_maskings} failed
+                    </span>
+                  ) : (
+                    "All items processed"
+                  )}
                 </div>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </motion.div>
       )}
 
-      {/* Document Actions */}
+      {/* Document Comparison */}
       <motion.div
         className="neumorphic-card p-6"
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, delay: 0.2 }}
+        transition={{ duration: 0.3, delay: 0.3 }}
       >
         <Card className="border-0 shadow-none bg-transparent">
           <CardHeader className="px-0 pb-4">
-            <CardTitle className="flex items-center">
-              <FileText size={20} className="mr-2 text-primary" />
-              Masked Document
+            <CardTitle className="flex items-center justify-between">
+              <div className="flex items-center">
+                <ArrowLeftRight size={20} className="mr-2 text-primary" />
+                Document Comparison
+              </div>
             </CardTitle>
           </CardHeader>
           <CardContent className="px-0">
-            <div className="neumorphic-flat p-6 rounded-xl">
-              <div className="flex items-center justify-between">
-                <div className="space-y-1">
-                  <h4 className="font-medium">
-                    {maskingStatus?.masked_filename || "Masked Document"}
-                  </h4>
-                  <p className="text-sm text-muted-foreground">
-                    Your document with PII safely masked using selected
-                    strategies
-                  </p>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Original Document */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-medium text-sm">Original Document</h4>
                 </div>
-                <div className="flex space-x-3">
-                  <Button
-                    variant="outline"
-                    onClick={handlePreview}
-                    className="neumorphic-button"
-                  >
-                    <ArrowLeftRight size={16} className="mr-2" />
-                    Compare Documents
-                  </Button>
-                  <Button
-                    onClick={handleDownload}
-                    disabled={isDownloading}
-                    className="neumorphic-button"
-                  >
-                    {isDownloading ? (
-                      <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                        Downloading...
-                      </>
-                    ) : (
-                      <>
-                        <Download size={16} className="mr-2" />
-                        Download
-                      </>
-                    )}
-                  </Button>
+                <div className="neumorphic-flat rounded-xl overflow-hidden">
+                  <iframe
+                    src={documentsApi.getViewUrl(documentId)}
+                    className="w-full h-96 border-0"
+                    title="Original Document"
+                  />
+                </div>
+              </div>
+
+              {/* Masked Document */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-medium text-sm">Masked Document</h4>
+                </div>
+                <div className="neumorphic-flat rounded-xl overflow-hidden">
+                  <iframe
+                    src={
+                      maskingStatus?.masked_document_id
+                        ? documentsApi.getViewUrl(
+                            maskingStatus.masked_document_id
+                          )
+                        : "about:blank"
+                    }
+                    className="w-full h-96 border-0"
+                    title="Masked Document"
+                  />
                 </div>
               </div>
             </div>
           </CardContent>
         </Card>
       </motion.div>
-
-      {/* Document Comparison */}
-      {activeView === "comparison" && documentId && (
-        <motion.div
-          className="neumorphic-card p-6"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.3 }}
-        >
-          <Card className="border-0 shadow-none bg-transparent">
-            <CardHeader className="px-0 pb-4">
-              <CardTitle className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <ArrowLeftRight size={20} className="mr-2 text-primary" />
-                  Document Comparison
-                </div>
-                <Tabs
-                  value={activeView}
-                  onValueChange={(value) => setActiveView(value as any)}
-                >
-                  <TabsList className="grid w-full grid-cols-3">
-                    <TabsTrigger value="comparison">Side by Side</TabsTrigger>
-                    <TabsTrigger value="original">Original Only</TabsTrigger>
-                    <TabsTrigger value="masked">Masked Only</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-0">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Original Document */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-medium text-sm">Original Document</h4>
-                    <Badge variant="outline" className="text-xs">
-                      Before Masking
-                    </Badge>
-                  </div>
-                  <div className="neumorphic-flat rounded-xl overflow-hidden">
-                    <iframe
-                      src={documentsApi.getViewUrl(documentId)}
-                      className="w-full h-96 border-0"
-                      title="Original Document"
-                    />
-                  </div>
-                </div>
-
-                {/* Masked Document */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-medium text-sm">Masked Document</h4>
-                    <Badge variant="default" className="text-xs">
-                      After Masking
-                    </Badge>
-                  </div>
-                  <div className="neumorphic-flat rounded-xl overflow-hidden">
-                    <iframe
-                      src={
-                        maskingStatus?.masked_document_id
-                          ? documentsApi.getViewUrl(
-                              maskingStatus.masked_document_id
-                            )
-                          : "about:blank"
-                      }
-                      className="w-full h-96 border-0"
-                      title="Masked Document"
-                    />
-                  </div>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
-
-      {/* Single Document Views */}
-      {activeView === "original" && documents[0] && (
-        <motion.div
-          className="neumorphic-card p-6"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.3 }}
-        >
-          <Card className="border-0 shadow-none bg-transparent">
-            <CardHeader className="px-0 pb-4">
-              <CardTitle className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <FileText size={20} className="mr-2 text-primary" />
-                  Original Document
-                </div>
-                <Tabs
-                  value={activeView}
-                  onValueChange={(value) => setActiveView(value as any)}
-                >
-                  <TabsList className="grid w-full grid-cols-3">
-                    <TabsTrigger value="comparison">Side by Side</TabsTrigger>
-                    <TabsTrigger value="original">Original Only</TabsTrigger>
-                    <TabsTrigger value="masked">Masked Only</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-0">
-              <div className="neumorphic-flat rounded-xl overflow-hidden">
-                <iframe
-                  src={documentsApi.getViewUrl(documentId)}
-                  className="w-full h-96 border-0"
-                  title="Original Document"
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
-
-      {activeView === "masked" && documents[0] && (
-        <motion.div
-          className="neumorphic-card p-6"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.3 }}
-        >
-          <Card className="border-0 shadow-none bg-transparent">
-            <CardHeader className="px-0 pb-4">
-              <CardTitle className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <Shield size={20} className="mr-2 text-primary" />
-                  Masked Document
-                </div>
-                <Tabs
-                  value={activeView}
-                  onValueChange={(value) => setActiveView(value as any)}
-                >
-                  <TabsList className="grid w-full grid-cols-3">
-                    <TabsTrigger value="comparison">Side by Side</TabsTrigger>
-                    <TabsTrigger value="original">Original Only</TabsTrigger>
-                    <TabsTrigger value="masked">Masked Only</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-0">
-              <div className="neumorphic-flat rounded-xl overflow-hidden">
-                <iframe
-                  src={
-                    maskingStatus?.masked_document_id
-                      ? documentsApi.getViewUrl(
-                          maskingStatus.masked_document_id
-                        )
-                      : "about:blank"
-                  }
-                  className="w-full h-96 border-0"
-                  title="Masked Document"
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </motion.div>
-      )}
 
       {/* Complete Workflow */}
       <motion.div

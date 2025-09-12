@@ -1,13 +1,10 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ChevronLeft, ChevronRight, CheckCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { DocumentUpload } from "@/components/ingestion/DocumentUpload";
 import { DocumentReview } from "@/components/ingestion/DocumentReview";
 import { DetectionStep } from "@/components/ingestion/DetectionStep";
 import { MaskingStep } from "@/components/ingestion/MaskingStep";
 import { MaskingResultsStep } from "@/components/ingestion/MaskingResultsStep";
-import { QAStep } from "@/components/ingestion/QAStep";
 import { useNavigate } from "react-router-dom";
 
 interface UploadedFile {
@@ -43,6 +40,15 @@ export default function DocumentIngestion() {
   const [detectedPIIData, setDetectedPIIData] = useState<any>(null);
   const navigate = useNavigate();
 
+  // Debug logging
+  console.log("DocumentIngestion state:", {
+    currentPhase,
+    currentStepIndex,
+    workflowSteps,
+    completedSteps,
+    detectedPIIData: detectedPIIData ? "exists" : "null",
+  });
+
   const handleUploadComplete = (files: UploadedFile[]) => {
     setUploadedFiles(files);
     // Extract document IDs from uploaded files
@@ -62,10 +68,18 @@ export default function DocumentIngestion() {
   };
 
   const handleDetectionComplete = (detectionResults: any) => {
+    console.log("handleDetectionComplete called with:", detectionResults);
     setDetectedPIIData(detectionResults);
 
     // Mark detection step as completed and next as active
     const currentStepId = workflowSteps[currentStepIndex].id;
+    console.log(
+      "Current step ID:",
+      currentStepId,
+      "Current step index:",
+      currentStepIndex
+    );
+
     setCompletedSteps((prev) => [...prev, currentStepId]);
 
     setWorkflowSteps((prev) =>
@@ -79,9 +93,12 @@ export default function DocumentIngestion() {
       })
     );
 
-    // Move to next step
-    setCurrentStepIndex((prev) => prev + 1);
+    // Move to next step - this is the key fix
+    const nextStepIndex = currentStepIndex + 1;
+    setCurrentStepIndex(nextStepIndex);
     setCurrentPhase("masking");
+
+    console.log("Set current phase to masking, step index to:", nextStepIndex);
   };
 
   const handleMaskPII = () => {
@@ -110,45 +127,6 @@ export default function DocumentIngestion() {
     navigate("/dashboard");
   };
 
-  const handleNextStep = () => {
-    if (currentStepIndex < workflowSteps.length - 1) {
-      // Mark current step as completed and next as active
-      const currentStepId = workflowSteps[currentStepIndex].id;
-      setCompletedSteps((prev) => [...prev, currentStepId]);
-
-      setWorkflowSteps((prev) =>
-        prev.map((step, index) => {
-          if (index === currentStepIndex) {
-            return { ...step, status: "completed" };
-          } else if (index === currentStepIndex + 1) {
-            return { ...step, status: "active" };
-          }
-          return step;
-        })
-      );
-
-      // Move to next step
-      setCurrentStepIndex((prev) => prev + 1);
-    }
-  };
-
-  const handlePreviousStep = () => {
-    if (currentStepIndex > 0) {
-      setWorkflowSteps((prev) =>
-        prev.map((step, index) => {
-          if (index === currentStepIndex) {
-            return { ...step, status: "pending" };
-          } else if (index === currentStepIndex - 1) {
-            return { ...step, status: "active" };
-          }
-          return step;
-        })
-      );
-
-      // Move to previous step
-    }
-  };
-
   const getCurrentStepContent = () => {
     const currentStep = workflowSteps[currentStepIndex];
 
@@ -172,7 +150,7 @@ export default function DocumentIngestion() {
           <MaskingResultsStep
             onComplete={handleWorkflowComplete}
             detectedPIIData={detectedPIIData}
-            documentId={uploadedDocumentIds[0]} // Pass the current document ID
+            documentId={uploadedDocumentIds[0]}
           />
         );
       default:
@@ -184,9 +162,6 @@ export default function DocumentIngestion() {
         );
     }
   };
-
-  const isLastStep = currentStepIndex === workflowSteps.length - 1;
-  const isFirstStep = currentStepIndex === 0;
 
   return (
     <motion.div
@@ -243,55 +218,6 @@ export default function DocumentIngestion() {
             transition={{ duration: 0.3 }}
           >
             {getCurrentStepContent()}
-          </motion.div>
-
-          {/* Navigation Controls */}
-          <motion.div
-            className="neumorphic-card p-6"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.2 }}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-4">
-                <Button
-                  variant="outline"
-                  onClick={handlePreviousStep}
-                  disabled={isFirstStep}
-                  className="neumorphic-button"
-                >
-                  <ChevronLeft size={16} className="mr-2" />
-                  Previous Step
-                </Button>
-
-                <div className="text-sm text-muted-foreground">
-                  {uploadedFiles.length} document
-                  {uploadedFiles.length !== 1 ? "s" : ""} uploaded
-                </div>
-              </div>
-
-              <div className="flex items-center space-x-4">
-                <div className="text-sm text-muted-foreground">
-                  {completedSteps.length} of {workflowSteps.length} steps
-                  completed
-                </div>
-
-                {isLastStep ? (
-                  <Button className="neumorphic-button">
-                    <CheckCircle size={16} className="mr-2" />
-                    Complete Processing
-                  </Button>
-                ) : (
-                  <Button
-                    onClick={handleNextStep}
-                    className="neumorphic-button"
-                  >
-                    Next
-                    <ChevronRight size={16} className="ml-2" />
-                  </Button>
-                )}
-              </div>
-            </div>
           </motion.div>
         </>
       )}

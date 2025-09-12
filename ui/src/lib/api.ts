@@ -435,6 +435,111 @@ export const piiApi = {
       total_requested: number;
       errors?: string[];
     }>("/pii/batch-detect", { document_ids: documentIds }),
+
+  // Streaming PII detection functions
+  detectPIIStream: (
+    documentId: string,
+    onMessage: (event: any) => void,
+    onError?: (error: Error) => void
+  ) => {
+    const token = getAuthToken();
+    if (!token) {
+      throw new Error("No authentication token");
+    }
+
+    const eventSource = new EventSource(
+      `${API_BASE_URL}/pii/detect-stream/${documentId}?token=${token}`
+    );
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        onMessage(data);
+
+        // Close connection on completion or error
+        if (data.type === "complete" || data.type === "error") {
+          eventSource.close();
+        }
+      } catch (error) {
+        console.error("Error parsing SSE data:", error);
+        onError?.(error as Error);
+        eventSource.close();
+      }
+    };
+
+    eventSource.onerror = (error) => {
+      console.error("SSE error:", error);
+      onError?.(new Error("Connection error"));
+      eventSource.close();
+    };
+
+    return eventSource;
+  },
+
+  batchDetectPIIStream: (
+    documentIds: string[],
+    onMessage: (event: any) => void,
+    onError?: (error: Error) => void
+  ) => {
+    const token = getAuthToken();
+    if (!token) {
+      throw new Error("No authentication token");
+    }
+
+    // For batch streaming, we need to use fetch with streaming response
+    const controller = new AbortController();
+
+    fetch(`${API_BASE_URL}/pii/batch-detect-stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        Accept: "text/event-stream",
+      },
+      body: JSON.stringify({ document_ids: documentIds }),
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error("No response body");
+        }
+
+        const decoder = new TextDecoder();
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split("\n");
+
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                onMessage(data);
+              } catch (error) {
+                console.error("Error parsing SSE data:", error);
+              }
+            }
+          }
+        }
+      })
+      .catch((error) => {
+        if (error.name !== "AbortError") {
+          onError?.(error);
+        }
+      });
+
+    return {
+      close: () => controller.abort(),
+    };
+  },
 };
 
 export const complianceApi = {
@@ -517,6 +622,91 @@ export const sandboxApi = {
     apiClient.post("/sandbox/chat", { message, context }),
 
   getChatHistory: () => apiClient.get("/sandbox/history"),
+};
+
+export const syntheticDataApi = {
+  startGeneration: (documentId: string, numDatasets: number) =>
+    apiClient.post("/synthetic/generate", {
+      document_id: documentId,
+      num_datasets: numDatasets,
+    }),
+
+  getGenerationStatus: (jobId: string) =>
+    apiClient.get(`/synthetic/status/${jobId}`),
+
+  listDatasets: () =>
+    apiClient.get<{
+      datasets: Array<{
+        id: string;
+        synthetic_name: string;
+        original_name: string;
+        dataset_number: number;
+        size: number;
+        created_at: string;
+        job_id: string;
+      }>;
+      total_count: number;
+    }>("/synthetic/datasets"),
+
+  downloadDataset: async (datasetId: string, fileName: string) => {
+    const token = getAuthToken();
+    const response = await fetch(
+      `${API_BASE_URL}/synthetic/datasets/${datasetId}/download`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("Download failed");
+    }
+
+    // Create blob and trigger download
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  },
+
+  previewDataset: (datasetId: string) =>
+    apiClient.get<{
+      id: string;
+      name: string;
+      original_name: string;
+      size: number;
+      content_preview: string;
+      created_at: string;
+    }>(`/synthetic/datasets/${datasetId}/preview`),
+
+  listJobs: () =>
+    apiClient.get<{
+      jobs: Array<{
+        job_id: string;
+        document_name: string;
+        num_datasets: number;
+        status: string;
+        progress: number;
+        status_message: string;
+        created_at: string;
+        completed_at?: string;
+        generated_datasets?: Array<{
+          id: string;
+          name: string;
+          dataset_number: number;
+          size: number;
+          created_at: string;
+        }>;
+        error?: string;
+      }>;
+      total_count: number;
+    }>("/synthetic/jobs"),
 };
 
 // Query client for React Query

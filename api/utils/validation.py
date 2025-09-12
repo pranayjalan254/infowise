@@ -9,6 +9,19 @@ from pydantic import BaseModel, EmailStr, Field, validator
 from enum import Enum
 
 
+def validate_required_fields(data: dict, required_fields: list) -> dict:
+    """Validate that all required fields are present in the data."""
+    missing_fields = []
+    for field in required_fields:
+        if field not in data or data[field] is None:
+            missing_fields.append(field)
+    
+    return {
+        'valid': len(missing_fields) == 0,
+        'missing_fields': missing_fields
+    }
+
+
 # Enums
 class PIISeverity(str, Enum):
     LOW = "low"
@@ -284,3 +297,35 @@ def validate_file_upload(file, config) -> Optional[str]:
     # But we can add custom checks here if needed
     
     return None
+
+
+def validate_required_fields(data: dict, required_fields: list) -> dict:
+    """
+    Validate that all required fields are present in the data.
+    
+    Args:
+        data: Dictionary to validate
+        required_fields: List of required field names
+        
+    Returns:
+        Dictionary with validation result:
+        {
+            'valid': bool,
+            'missing_fields': list
+        }
+    """
+    if not data:
+        return {
+            'valid': False,
+            'missing_fields': required_fields
+        }
+    
+    missing_fields = []
+    for field in required_fields:
+        if field not in data or data[field] is None or data[field] == '':
+            missing_fields.append(field)
+    
+    return {
+        'valid': len(missing_fields) == 0,
+        'missing_fields': missing_fields
+    }

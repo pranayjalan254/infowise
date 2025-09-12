@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { mockPIIDetections, mockMaskingOptions } from "@/data/mockData";
+import { mockMaskingOptions } from "@/data/mockData";
 import { PIIDetection } from "@/types";
 import {
   Select,
@@ -36,19 +36,6 @@ interface MaskingSelection {
   [key: string]: string;
 }
 
-const generateMockPIIForDocument = (
-  documentId: string,
-  documentName: string
-): PIIDetection[] => {
-  return mockPIIDetections.map((detection, index) => ({
-    ...detection,
-    id: `${documentId}-${detection.id}`,
-    location: `${documentName}, Page ${
-      Math.floor(Math.random() * 3) + 1
-    }, Line ${Math.floor(Math.random() * 20) + 1}`,
-  }));
-};
-
 const convertRealPIIToMaskingFormat = (
   realPIIData: any,
   documentId: string,
@@ -59,24 +46,26 @@ const convertRealPIIToMaskingFormat = (
   }
 
   return realPIIData.pii_items.map((pii: any) => ({
-    id: pii.id, // Use the original ID from backend
+    id: pii.id,
     type: pii.type,
-    confidence: pii.confidence, // Keep as decimal (0.98964 = 98.96%)
+    confidence: pii.confidence,
     location: `${documentName}, ${pii.location}`,
     extractedValue: pii.text,
     severity: pii.severity || "medium",
   }));
 };
 
-// Helper function to get PII data for a document (real or mock)
+// Helper function to get PII data for a document
 const getPIIForDocument = (
   detectedPIIData: any,
   documentId: string,
   documentName: string
 ): PIIDetection[] => {
-  return detectedPIIData
-    ? convertRealPIIToMaskingFormat(detectedPIIData, documentId, documentName)
-    : generateMockPIIForDocument(documentId, documentName);
+  return convertRealPIIToMaskingFormat(
+    detectedPIIData,
+    documentId,
+    documentName
+  );
 };
 
 // Helper function to group PII items by type
@@ -151,7 +140,7 @@ export function MaskingStep({ onMaskPII, detectedPIIData }: MaskingStepProps) {
     if (allPII.length > 0) {
       const defaultMaskingOptions: MaskingSelection = {};
       allPII.forEach((pii) => {
-        defaultMaskingOptions[pii.id] = "redact"; // Default to redact strategy
+        defaultMaskingOptions[pii.id] = "redact";
       });
       setSelectedMaskingOptions(defaultMaskingOptions);
     }
@@ -175,13 +164,11 @@ export function MaskingStep({ onMaskPII, detectedPIIData }: MaskingStepProps) {
   const handleApplyMasking = async () => {
     setIsProcessing(true);
     try {
-      // Get the current document ID (assuming single document for now)
       const documentId = documents[0]?.id;
       if (!documentId) {
         throw new Error("No document found");
       }
 
-      // Save masking configuration to backend first
       const configResponse = await piiApi.saveMaskingConfig(
         documentId,
         selectedMaskingOptions
@@ -238,26 +225,6 @@ export function MaskingStep({ onMaskPII, detectedPIIData }: MaskingStepProps) {
     });
     setSelectedMaskingOptions((prev) => ({ ...prev, ...updates }));
   };
-
-  const handleBulkMask = async () => {
-    setIsProcessing(true);
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    setIsProcessing(false);
-    onMaskPII();
-  };
-
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <div className="neumorphic-card p-6">
-          <div className="flex items-center justify-center h-32">
-            <div className="text-muted-foreground">Loading documents...</div>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6">

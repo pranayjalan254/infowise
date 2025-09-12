@@ -722,6 +722,7 @@ class BERTPIIMasker:
                         else:
                             stats["failed_maskings"] += 1
                     else:
+                        logger.warning(f"No coordinates available for PII '{pii_config.text}', trying text search fallback")
                         # Fallback: search for text instances (old method)
                         text_instances = self.find_text_instances_in_page(page, pii_config.text)
                         
