@@ -25,6 +25,7 @@ dnspython==2.7.0
 email-validator==2.3.0
 en-core-web-lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.7.1/en_core_web_lg-3.7.1-py3-none-any.whl#sha256=ab70aeb6172cde82508f7739f35ebc9918a3d07debeed637403c8f794ba3d3dc
 en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl#sha256=86cc141f63942d4b2c5fcee06630fd6f904788d2f0ab005cce45aadb8fb73889
+faiss-cpu==1.12.0
 filelock==3.19.1
 filetype==1.2.0
 flake8==7.3.0
@@ -55,6 +56,7 @@ idna==3.10
 iniconfig==2.1.0
 itsdangerous==2.2.0
 Jinja2==3.1.6
+joblib==1.5.2
 jsonpatch==1.33
 jsonpointer==3.0.0
 langchain==0.3.27
@@ -91,6 +93,7 @@ ormsgpack==1.10.0
 packaging==25.0
 pathspec==0.12.1
 phonenumbers==8.13.55
+pillow==11.3.0
 platformdirs==4.4.0
 pluggy==1.6.0
 preshed==3.0.10
@@ -124,6 +127,7 @@ pytz==2025.2
 PyYAML==6.0.2
 redis==6.4.0
 regex==2025.8.29
+reportlab==4.4.3
 requests==2.32.5
 requests-file==2.1.0
 requests-oauthlib==2.0.0
@@ -132,6 +136,9 @@ rich==13.9.4
 rq==2.5.0
 rsa==4.9.1
 safetensors==0.6.2
+scikit-learn==1.7.2
+scipy==1.16.1
+sentence-transformers==5.1.0
 setuptools==80.9.0
 six==1.17.0
 smart-open==6.4.0
@@ -144,6 +151,7 @@ srsly==2.5.1
 sympy==1.13.3
 tenacity==9.1.2
 thinc==8.2.5
+threadpoolctl==3.6.0
 tldextract==5.3.0
 tokenizers==0.22.0
 torch==2.8.0+cpu
@@ -161,4 +169,3 @@ wrapt==1.17.3
 xxhash==3.5.0
 yarl==1.20.1
 zstandard==0.24.0
-reportlab==4.0.7

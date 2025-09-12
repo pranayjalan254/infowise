@@ -1,6 +1,7 @@
 """
 PII Detection service.
-Handles detection of PII in uploaded documents and returns results for frontend display.
+Handles detection of PII in uploaded documents using enhanced multi-method detection.
+Combines BERT, Presidio/spaCy, regex patterns, and optional LLM verification.
 """
 
 import os
@@ -11,7 +12,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from utils.responses import success_response, error_response
 from utils.helpers import get_current_timestamp
 from mongodb import get_mongo_db
-from pii_detector_config_generator import PIIDetectorConfigGenerator
+from enhanced_pii_detector import EnhancedPIIDetector
 
 pii_detection_bp = Blueprint('pii_detection', __name__)
 
@@ -20,21 +21,23 @@ mongo_db = get_mongo_db()
 
 
 class PIIDetectionService:
-    """Service for detecting PII in documents."""
+    """Enhanced service for detecting PII in documents using multiple methods."""
     
     def __init__(self):
-        self.detector = PIIDetectorConfigGenerator()
+        # Get Google API key from environment
+        google_api_key = os.getenv('GOOGLE_API_KEY')
+        self.detector = EnhancedPIIDetector(google_api_key=google_api_key)
     
     def detect_pii_in_document(self, document_id: str, user_id: str) -> Dict[str, Any]:
         """
-        Detect PII in a document and return results.
+        Detect PII in a document using enhanced multi-method detection.
         
         Args:
             document_id: MongoDB document ID
             user_id: User ID for authorization
             
         Returns:
-            Dictionary containing detected PII information
+            Dictionary containing comprehensive PII detection results
         """
         try:
             # Get document from MongoDB
@@ -52,50 +55,70 @@ class PIIDetectionService:
                 temp_pdf_path = temp_file.name
             
             try:
-                # Extract text and detect PII
+                # Extract text and detect PII using enhanced detector
                 pages_data = self.detector.extract_text_with_coordinates(temp_pdf_path)
                 all_detected_pii = []
                 
                 for page_text, page_num, doc in pages_data:
                     if page_text.strip():  # Only process pages with text
-                        page_pii = self.detector.detect_all_pii(page_text, page_num, doc)
+                        page = doc[page_num]
+                        page_pii = self.detector.detect_all_pii(page_text, page_num, page)
                         all_detected_pii.extend(page_pii)
                 
                 # Close the document
                 if pages_data and len(pages_data) > 0:
                     pages_data[0][2].close()
                 
-                # Convert DetectedPII objects to dictionaries for JSON response
+                # Convert PIIEntity objects to dictionaries for JSON response
                 pii_results = []
                 for idx, pii in enumerate(all_detected_pii):
-                    # Generate a consistent, positive, unique ID using text, coordinates and a small hash
-                    # Using a combination approach to avoid collisions but remain deterministic
+                    # Generate a consistent, unique ID
                     id_components = f"{pii.text}_{pii.page_num}_{pii.x0:.2f}_{pii.y0:.2f}_{pii.pii_type}"
                     id_string = f"pii_{abs(hash(id_components))}"
+                    
+                    # Map severity to display format
+                    severity_mapping = {
+                        "high": "high",
+                        "medium": "medium", 
+                        "low": "low"
+                    }
+                    
                     pii_results.append({
                         'id': id_string,
-                        'type': pii.pii_type,  # Use pii_type instead of label
+                        'type': pii.pii_type,
                         'text': pii.text,
-                        'confidence': float(pii.confidence),  # Use confidence instead of score
-                        'location': f"Page {pii.page_num + 1}",  # Display as 1-based for user
-                        'severity': 'high' if float(pii.confidence) > 0.9 else 'medium' if float(pii.confidence) > 0.7 else 'low',
-                        'suggested_strategy': pii.suggested_strategy,  # Use the actual suggested strategy
+                        'confidence': float(pii.confidence),
+                        'location': f"Page {pii.page_num + 1}",  # Display as 1-based
+                        'severity': severity_mapping.get(pii.severity, 'medium'),
+                        'suggested_strategy': pii.suggested_strategy,
+                        'source': pii.source,  # Show detection source
+                        'verified_by_llm': pii.verified_by_llm,
                         'coordinates': {
-                            'page': int(pii.page_num),  # Store as 0-based for internal use
-                            'x0': float(pii.x0),  # Convert numpy types to Python types
+                            'page': int(pii.page_num),  # Store as 0-based
+                            'x0': float(pii.x0),
                             'y0': float(pii.y0),
                             'x1': float(pii.x1),
                             'y1': float(pii.y1)
                         }
                     })
                 
-                # Update document metadata with PII detection results
+                # Generate detection report
+                detection_report = self.detector.generate_detection_report(all_detected_pii)
+                
+                # Update document metadata with enhanced PII detection results
                 detection_metadata = {
                     'pii_detection': {
                         'status': 'completed',
                         'detected_count': len(pii_results),
                         'detection_date': get_current_timestamp(),
-                        'results': pii_results
+                        'results': pii_results,
+                        'detection_report': detection_report,
+                        'methods_used': {
+                            'bert': self.detector.bert_pipeline is not None,
+                            'presidio': self.detector.presidio_analyzer is not None,
+                            'regex': True,
+                            'llm_verification': self.detector.gemini_llm is not None
+                        }
                     }
                 }
                 

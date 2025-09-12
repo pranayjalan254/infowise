@@ -1,6 +1,7 @@
 """
 PII Masking service.
-Handles masking of PII in documents using coordinate-based configuration.
+Handles masking of PII in documents using enhanced coordinate-based configuration
+with overlap resolution and multiple detection methods.
 """
 
 import os
@@ -12,7 +13,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from utils.responses import success_response, error_response
 from utils.helpers import get_current_timestamp
 from mongodb import get_mongo_db
-from bert_pii_masker import BERTPIIMasker, PIIConfig
+from enhanced_pii_masker import EnhancedPIIMasker, MaskingConfig
 
 pii_masking_bp = Blueprint('pii_masking', __name__)
 
@@ -21,21 +22,21 @@ mongo_db = get_mongo_db()
 
 
 class PIIMaskingService:
-    """Service for masking PII in documents."""
+    """Enhanced service for masking PII in documents with coordinate overlap resolution."""
     
     def __init__(self):
-        self.masker = BERTPIIMasker()
+        self.masker = EnhancedPIIMasker()
     
     def apply_masking_to_document(self, document_id: str, user_id: str) -> Dict[str, Any]:
         """
-        Apply PII masking to a document using saved configuration.
+        Apply PII masking to a document using enhanced methods and coordinate overlap resolution.
         
         Args:
             document_id: MongoDB document ID
             user_id: User ID for authorization
             
         Returns:
-            Dictionary containing masking results and masked file info
+            Dictionary containing comprehensive masking results and masked file info
         """
         try:
             # Get document from MongoDB
@@ -70,17 +71,20 @@ class PIIMaskingService:
             output_pdf_path = tempfile.mktemp(suffix='_masked.pdf')
             
             try:
-                # Generate PII configuration for masking
-                pii_configs = self._generate_pii_configs_from_metadata(
+                # Generate enhanced masking configurations
+                masking_configs = self._generate_enhanced_masking_configs(
                     pii_detection, masking_config
                 )
                 
-                if not pii_configs:
+                if not masking_configs:
                     raise ValueError("No PII configurations generated for masking")
                 
-                # Apply masking using bert_pii_masker
-                masking_stats = self.masker.mask_pdf_with_config(
-                    input_pdf_path, output_pdf_path, pii_configs
+                current_app.logger.info(f"Generated {len(masking_configs)} masking configurations")
+                current_app.logger.info(f"Sample config: {masking_configs[0].__dict__ if masking_configs else 'None'}")
+                
+                # Apply enhanced masking with coordinate overlap resolution using pre-configured strategies
+                masking_stats = self.masker.mask_pdf_with_preconfigured_strategies(
+                    input_pdf_path, output_pdf_path, masking_configs
                 )
                 
                 # Read the masked PDF
@@ -107,12 +111,14 @@ class PIIMaskingService:
                             'masking_applied': True,
                             'masking_date': get_current_timestamp(),
                             'masking_stats': masking_stats,
-                            'pii_configs_applied': len(pii_configs)
+                            'enhanced_masking': True,
+                            'coordinate_overlaps_resolved': masking_stats.get('overlaps_resolved', 0),
+                            'quality_score': masking_stats.get('quality_score', 0)
                         }
                     }
                 )
                 
-                # Update original document metadata with masking results
+                # Update original document metadata with enhanced masking results
                 masking_metadata = {
                     'masking_results': {
                         'status': 'completed',
@@ -120,9 +126,12 @@ class PIIMaskingService:
                         'masked_filename': masked_filename,
                         'masking_date': get_current_timestamp(),
                         'stats': masking_stats,
-                        'total_pii_masked': masking_stats.get('total_pii_masked', 0),
+                        'total_pii_masked': masking_stats.get('successful_maskings', 0),
                         'strategies_used': masking_stats.get('strategies_used', {}),
-                        'failed_maskings': masking_stats.get('failed_maskings', 0)
+                        'failed_maskings': masking_stats.get('failed_maskings', 0),
+                        'overlaps_resolved': masking_stats.get('overlaps_resolved', 0),
+                        'quality_score': masking_stats.get('quality_score', 0),
+                        'enhanced_masking': True
                     }
                 }
                 
@@ -133,8 +142,10 @@ class PIIMaskingService:
                     'masked_document_id': masked_document_id,
                     'masked_filename': masked_filename,
                     'masking_stats': masking_stats,
-                    'total_pii_masked': masking_stats.get('total_pii_masked', 0),
+                    'total_pii_masked': masking_stats.get('successful_maskings', 0),
                     'strategies_used': masking_stats.get('strategies_used', {}),
+                    'overlaps_resolved': masking_stats.get('overlaps_resolved', 0),
+                    'quality_score': masking_stats.get('quality_score', 0),
                     'masking_date': masking_metadata['masking_results']['masking_date']
                 }
                 
@@ -148,41 +159,44 @@ class PIIMaskingService:
                             pass
                             
         except Exception as e:
-            current_app.logger.error(f"PII masking error: {str(e)}")
+            current_app.logger.error(f"Enhanced PII masking error: {str(e)}")
             raise
     
-    def _generate_pii_configs_from_metadata(self, pii_detection: Dict, masking_config: Dict) -> List[PIIConfig]:
+    def _generate_enhanced_masking_configs(self, pii_detection: Dict, masking_config: Dict) -> List[MaskingConfig]:
         """
-        Generate PIIConfig objects from PII detection results and masking configuration.
+        Generate enhanced MaskingConfig objects from PII detection results and masking configuration.
         
         Args:
-            pii_detection: PII detection metadata
+            pii_detection: Enhanced PII detection metadata
             masking_config: Masking configuration metadata
             
         Returns:
-            List of PIIConfig objects
+            List of enhanced MaskingConfig objects
         """
-        pii_configs = []
+        masking_configs = []
         pii_items = pii_detection.get('results', [])
         strategies = masking_config.get('strategies', {})
         
-        current_app.logger.info(f"Generating PII configs - Found {len(pii_items)} PII items and {len(strategies)} strategies")
+        current_app.logger.info(f"Generating enhanced masking configs - Found {len(pii_items)} PII items and {len(strategies)} strategies")
         current_app.logger.info(f"Strategy keys: {list(strategies.keys())}")
+        current_app.logger.info(f"First few strategies: {dict(list(strategies.items())[:5])}")  # Log first 5 strategies
         
         for pii_item in pii_items:
             pii_id = pii_item.get('id')
             strategy = strategies.get(pii_id)
             
-            current_app.logger.info(f"Processing PII item {pii_id} with strategy: {strategy}")
+            current_app.logger.info(f"Processing PII item {pii_id} with strategy: {strategy} for text: '{pii_item.get('text', '')[:20]}...'")
             
             if not strategy:
-                current_app.logger.warning(f"No strategy found for PII item {pii_id}, skipping")
-                continue
+                current_app.logger.warning(f"No strategy found for PII item {pii_id}, using suggested strategy")
+                strategy = pii_item.get('suggested_strategy', 'redact')
             
             coordinates = pii_item.get('coordinates', {})
             
-            # Create PIIConfig object
-            config = PIIConfig(
+            # Create enhanced MaskingConfig object with priority
+            priority = self._get_strategy_priority(strategy)
+            
+            config = MaskingConfig(
                 text=pii_item.get('text', ''),
                 pii_type=pii_item.get('type', ''),
                 strategy=strategy,
@@ -190,13 +204,24 @@ class PIIMaskingService:
                 x0=coordinates.get('x0', 0.0),
                 y0=coordinates.get('y0', 0.0),
                 x1=coordinates.get('x1', 0.0),
-                y1=coordinates.get('y1', 0.0)
+                y1=coordinates.get('y1', 0.0),
+                priority=priority
             )
             
-            pii_configs.append(config)
+            masking_configs.append(config)
+            current_app.logger.debug(f"Created MaskingConfig: text='{config.text[:20]}...', type={config.pii_type}, strategy={config.strategy}")
         
-        current_app.logger.info(f"Generated {len(pii_configs)} PII configurations")
-        return pii_configs
+        current_app.logger.info(f"Generated {len(masking_configs)} enhanced masking configurations")
+        return masking_configs
+    
+    def _get_strategy_priority(self, strategy: str) -> int:
+        """Get priority level for masking strategy for overlap resolution."""
+        priorities = {
+            "redact": 3,    # Highest priority - complete removal
+            "mask": 2,      # Medium priority - character replacement
+            "pseudo": 1     # Lowest priority - text replacement
+        }
+        return priorities.get(strategy, 1)
     
     def get_masked_document(self, document_id: str, user_id: str) -> Dict[str, Any]:
         """

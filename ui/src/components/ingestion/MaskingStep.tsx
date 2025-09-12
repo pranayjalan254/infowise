@@ -36,38 +36,6 @@ interface MaskingSelection {
   [key: string]: string;
 }
 
-const convertRealPIIToMaskingFormat = (
-  realPIIData: any,
-  documentId: string,
-  documentName: string
-): PIIDetection[] => {
-  if (!realPIIData?.pii_items) {
-    return [];
-  }
-
-  return realPIIData.pii_items.map((pii: any) => ({
-    id: pii.id,
-    type: pii.type,
-    confidence: pii.confidence,
-    location: `${documentName}, ${pii.location}`,
-    extractedValue: pii.text,
-    severity: pii.severity || "medium",
-  }));
-};
-
-// Helper function to get PII data for a document
-const getPIIForDocument = (
-  detectedPIIData: any,
-  documentId: string,
-  documentName: string
-): PIIDetection[] => {
-  return convertRealPIIToMaskingFormat(
-    detectedPIIData,
-    documentId,
-    documentName
-  );
-};
-
 // Helper function to group PII items by type
 const groupPIIByType = (
   allPII: PIIDetection[]
@@ -106,20 +74,38 @@ export function MaskingStep({ onMaskPII, detectedPIIData }: MaskingStepProps) {
         const docs = response.data?.documents || [];
         setDocuments(docs);
 
-        // Aggregate all PII from all documents
+        // Debug logging to understand the data structure
+        console.log("Detected PII Data:", detectedPIIData);
+        console.log("Documents:", docs);
+
+        // Process PII data directly from detectedPIIData
+        // This data should already contain PII for the processed document(s)
         let allPIIItems: PIIDetection[] = [];
-        docs.forEach((doc) => {
-          const documentPII = getPIIForDocument(
-            detectedPIIData,
-            doc.id,
-            doc.name
-          );
-          allPIIItems = [...allPIIItems, ...documentPII];
-        });
+
+        if (detectedPIIData?.pii_items) {
+          // Convert the PII data to the expected format
+          allPIIItems = detectedPIIData.pii_items.map((pii: any) => ({
+            id: pii.id,
+            type: pii.type,
+            confidence: pii.confidence,
+            location:
+              pii.location || `Page ${(pii.coordinates?.page || 0) + 1}`,
+            extractedValue: pii.text,
+            severity: pii.severity || "medium",
+          }));
+        }
+
+        console.log("Processed PII Items:", allPIIItems);
+        console.log(
+          "Unique PII IDs:",
+          allPIIItems.map((pii) => pii.id)
+        );
 
         setAllPII(allPIIItems);
         const groupedPII = groupPIIByType(allPIIItems);
         setPiiByType(groupedPII);
+
+        console.log("Grouped PII by Type:", groupedPII);
 
         // Set active PII type to first one
         const firstType = Object.keys(groupedPII)[0];
@@ -246,31 +232,23 @@ export function MaskingStep({ onMaskPII, detectedPIIData }: MaskingStepProps) {
           </CardHeader>
           <CardContent className="px-0">
             <Tabs value={activePIIType} onValueChange={setActivePIIType}>
-              <TabsList
-                className={`grid w-full mb-6 ${
-                  Object.keys(piiByType).length <= 2
-                    ? "grid-cols-2"
-                    : Object.keys(piiByType).length <= 3
-                    ? "grid-cols-3"
-                    : "grid-cols-4"
-                }`}
-              >
-                {Object.entries(piiByType)
-                  .slice(0, 4)
-                  .map(([type, items]) => (
+              <div className="w-full mb-6">
+                <TabsList className="inline-flex h-10 items-center justify-start rounded-md bg-muted p-1 text-muted-foreground overflow-x-auto max-w-full">
+                  {Object.entries(piiByType).map(([type, items]) => (
                     <TabsTrigger
                       key={type}
                       value={type}
-                      className="flex items-center space-x-2 text-xs"
+                      className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm min-w-fit"
                     >
-                      <AlertTriangle size={14} />
-                      <span className="truncate max-w-[100px]">{type}</span>
-                      <Badge variant="secondary" className="text-xs">
+                      <AlertTriangle size={14} className="mr-1" />
+                      <span className="truncate max-w-[120px]">{type}</span>
+                      <Badge variant="secondary" className="text-xs ml-1">
                         {items.length}
                       </Badge>
                     </TabsTrigger>
                   ))}
-              </TabsList>
+                </TabsList>
+              </div>
 
               {Object.entries(piiByType).map(([type, items]) => {
                 const selectedForType = selectedItems[type] || [];

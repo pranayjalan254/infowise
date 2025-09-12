@@ -12,7 +12,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from utils.responses import success_response, error_response
 from utils.helpers import get_current_timestamp
 from mongodb import get_mongo_db
-from pii_detector_config_generator import PIIDetectorConfigGenerator
+from enhanced_pii_detector import EnhancedPIIDetector
 
 pii_streaming_bp = Blueprint('pii_streaming', __name__)
 
@@ -24,7 +24,9 @@ class StreamingPIIDetectionService:
     """Service for detecting PII in documents with streaming progress updates."""
     
     def __init__(self):
-        self.detector = PIIDetectorConfigGenerator()
+        # Get Google API key from environment
+        google_api_key = os.getenv('GOOGLE_API_KEY')
+        self.detector = EnhancedPIIDetector(google_api_key=google_api_key)
     
     def detect_pii_with_streaming(self, document_id: str, user_id: str) -> Generator[str, None, None]:
         """
@@ -78,11 +80,14 @@ class StreamingPIIDetectionService:
                         # Yield progress update before processing page
                         yield f"data: {json.dumps({'type': 'progress', 'message': f'Analyzing page {page_num + 1}...', 'page': page_num + 1, 'total_pages': total_pages})}\n\n"
                         
-                        page_pii = self.detector.detect_all_pii(page_text, page_num, doc)
+                        # Get the page object for coordinate detection
+                        page_obj = doc[page_num] if doc else None
+                        page_pii = self.detector.detect_all_pii(page_text, page_num, page_obj)
                         all_detected_pii.extend(page_pii)
                         
                         # Yield page completion update
-                        page_message = f"Page {page_num + 1}: Found {len(page_pii)} PII entities"
+                        page_message = f"Page {page_num + 1}: Found {len(page_pii)} PII entities with coordinates"
+                        print(page_message)
                         yield f"data: {json.dumps({'type': 'page_complete', 'message': page_message, 'page': page_num + 1, 'pii_count': len(page_pii), 'total_found': len(all_detected_pii)})}\n\n"
                     else:
                         # Empty page
@@ -94,20 +99,30 @@ class StreamingPIIDetectionService:
                 
                 yield f"data: {json.dumps({'type': 'status', 'message': 'Processing detection results...'})}\n\n"
                 
-                # Convert DetectedPII objects to dictionaries for JSON response
+                # Convert PIIEntity objects to dictionaries for JSON response
                 pii_results = []
                 for idx, pii in enumerate(all_detected_pii):
                     # Generate a consistent, positive, unique ID
                     id_components = f"{pii.text}_{pii.page_num}_{pii.x0:.2f}_{pii.y0:.2f}_{pii.pii_type}"
                     id_string = f"pii_{abs(hash(id_components))}"
+                    
+                    # Map severity to display format
+                    severity_mapping = {
+                        "high": "high",
+                        "medium": "medium", 
+                        "low": "low"
+                    }
+                    
                     pii_results.append({
                         'id': id_string,
                         'type': pii.pii_type,
                         'text': pii.text,
                         'confidence': float(pii.confidence),
                         'location': f"Page {pii.page_num + 1}",  # Add 1 for display
-                        'severity': 'high' if float(pii.confidence) > 0.9 else 'medium' if float(pii.confidence) > 0.7 else 'low',
+                        'severity': severity_mapping.get(pii.severity, 'medium'),
                         'suggested_strategy': pii.suggested_strategy,
+                        'source': pii.source,  # Show detection source
+                        'verified_by_llm': pii.verified_by_llm,
                         'coordinates': {
                             'page': int(pii.page_num),  # Store as 0-based for internal use
                             'x0': float(pii.x0),
@@ -117,13 +132,23 @@ class StreamingPIIDetectionService:
                         }
                     })
                 
-                # Update document metadata with PII detection results
+                # Generate detection report
+                detection_report = self.detector.generate_detection_report(all_detected_pii)
+                
+                # Update document metadata with enhanced PII detection results
                 detection_metadata = {
                     'pii_detection': {
                         'status': 'completed',
                         'detected_count': len(pii_results),
                         'detection_date': get_current_timestamp(),
-                        'results': pii_results
+                        'results': pii_results,
+                        'detection_report': detection_report,
+                        'methods_used': {
+                            'bert': self.detector.bert_pipeline is not None,
+                            'presidio': self.detector.presidio_analyzer is not None,
+                            'regex': True,
+                            'llm_verification': self.detector.gemini_llm is not None
+                        }
                     }
                 }
                 
