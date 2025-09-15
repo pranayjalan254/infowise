@@ -17,9 +17,16 @@ import sys
 import os
 import re
 import logging
-from pathlib import Path
+import json
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import SystemMessage, HumanMessage
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -54,7 +61,7 @@ class PIIDetectorConfigGenerator:
     
     def __init__(self):
         self.ner_pipeline = None
-        self.custom_patterns = self._get_custom_patterns()
+        self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash")
         self._initialize_bert_model()
     
     def _initialize_bert_model(self):
@@ -83,56 +90,7 @@ class PIIDetectorConfigGenerator:
             logger.warning("Falling back to regex patterns only")
             self.ner_pipeline = None
     
-    def _get_custom_patterns(self) -> Dict[str, List[str]]:
-        """Define custom regex patterns for PII detection."""
-        return {
-            "SSN": [
-                r"\b\d{3}-\d{2}-\d{4}\b",          # XXX-XX-XXXX
-                r"\b\d{3}\s\d{2}\s\d{4}\b",        # XXX XX XXXX
-                r"\b\d{9}\b"                        # XXXXXXXXX (context dependent)
-            ],
-            "PHONE": [
-                r"\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b",
-                r"\b\d{3}-\d{3}-\d{4}\b",
-                r"\(\d{3}\)\s?\d{3}-\d{4}",
-                r"\+91[-.\s]?\d{10}\b",             # Indian phone numbers
-                r"\b[6-9]\d{9}\b"                   # Indian mobile numbers
-            ],
-            "EMAIL": [
-                r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
-            ],
-            "CREDIT_CARD": [
-                r"\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|3[0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\b"
-            ],
-            "BANK_ACCOUNT": [
-                r"\b\d{9,18}\b",                    # General bank account patterns
-                r"\b[A-Z]{2}\d{2}[A-Z0-9]{4}\d{7}([A-Z0-9]?){0,16}\b"  # IBAN format
-            ],
-            "AADHAAR": [
-                r"\b\d{4}\s\d{4}\s\d{4}\b",       # XXXX XXXX XXXX format
-                r"\b\d{12}\b"                      # 12 consecutive digits (context dependent)
-            ],
-            "PAN": [
-                r"\b[A-Z]{5}\d{4}[A-Z]{1}\b"      # ABCDE1234F format
-            ],
-            "INDIAN_VOTER_ID": [
-                r"\b[A-Z]{3}\d{7}\b",             # ABC1234567 format
-                r"\b[A-Z]{2}\d{8}\b"              # AB12345678 format
-            ],
-            "ZIP_CODE": [
-                r"\b\d{5}(?:-\d{4})?\b",          # US ZIP codes
-                r"\b\d{6}\b"                       # Indian PIN codes (context dependent)
-            ],
-            "DATE_OF_BIRTH": [
-                r"\b(?:0[1-9]|1[0-2])[/-](?:0[1-9]|[12]\d|3[01])[/-](?:19|20)\d{2}\b",  # MM/DD/YYYY
-                r"\b(?:0[1-9]|[12]\d|3[01])[/-](?:0[1-9]|1[0-2])[/-](?:19|20)\d{2}\b",  # DD/MM/YYYY
-                r"\b(?:19|20)\d{2}[/-](?:0[1-9]|1[0-2])[/-](?:0[1-9]|[12]\d|3[01])\b",  # YYYY/MM/DD
-            ],
-            "ADDRESS": [
-                r"\b\d+\s+[A-Za-z\s]+(Street|St|Avenue|Ave|Road|Rd|Lane|Ln|Drive|Dr|Boulevard|Blvd)\b",
-                r"\b\d+\s+[A-Za-z\s]+,\s*[A-Za-z\s]+,\s*[A-Z]{2}\s+\d{5}\b"  # Full address format
-            ]
-        }
+   
     
     def _suggest_masking_strategy(self, pii_type: str, text: str) -> str:
         """Suggest an appropriate masking strategy based on PII type and context."""
@@ -160,8 +118,80 @@ class PIIDetectorConfigGenerator:
         else:
             return "redact"
     
+    def _select_best_entity_type(self, entities: List[DetectedPII]) -> DetectedPII:
+        """
+        Select the most appropriate entity when multiple PII types are detected for the same text.
+        Priority order (most specific to least specific):
+        1. High-sensitivity types (SSN, CREDIT_CARD, BANK_ACCOUNT, etc.)
+        2. Specific identifiers (PASSPORT, EMPLOYEE_ID, STUDENT_ID, etc.)  
+        3. Contact info (EMAIL, PHONE)
+        4. Address components (ADDRESS over LOC)
+        5. Generic types (PERSON, ORG, LOC)
+        """
+        if len(entities) == 1:
+            return entities[0]
+        
+        # Define priority order (higher number = higher priority)
+        type_priority = {
+            # Highest priority - sensitive financial/government IDs
+            'SSN': 100,
+            'CREDIT_CARD': 95,
+            'BANK_ACCOUNT': 95,
+            'AADHAAR': 90,
+            'PAN': 90,
+            'PASSPORT': 85,
+            'DRIVER_LICENSE': 85,
+            'MEDICAL_RECORD': 80,
+            'INSURANCE_ID': 80,
+            
+            # High priority - specific identifiers
+            'EMPLOYEE_ID': 75,
+            'STUDENT_ID': 75,
+            'VACCINE_LOT': 70,
+            'TRACKING_NUMBER': 70,
+            'RECEIPT_NUMBER': 70,
+            'VOLUNTEER_CODE': 70,
+            'BARCODE': 65,
+            'VEHICLE_PLATE': 65,
+            
+            # Medium priority - technical identifiers
+            'MAC_ADDRESS': 60,
+            'IP_ADDRESS': 60,
+            'URL': 55,
+            'COORDINATES': 55,
+            
+            # Medium priority - contact information
+            'EMAIL': 50,
+            'PHONE': 50,
+            
+            # Medium priority - dates and addresses
+            'DATE_OF_BIRTH': 45,
+            'DATE': 40,
+            'ADDRESS': 35,  # More specific than LOC
+            'ZIP_CODE': 35,
+            
+            # Lower priority - generic types
+            'PERSON': 30,
+            'ORG': 25,
+            'LOC': 20,  # Less specific than ADDRESS
+            'MISC': 10
+        }
+        
+        # Sort entities by priority (highest first), then by confidence
+        sorted_entities = sorted(entities, 
+                               key=lambda x: (type_priority.get(x.pii_type, 0), x.confidence), 
+                               reverse=True)
+        
+        best_entity = sorted_entities[0]
+        
+        # Log the selection decision
+        entity_info = [(e.pii_type, type_priority.get(e.pii_type, 0), e.confidence) for e in entities]
+        logger.debug(f"Entity type selection for '{best_entity.text}': {entity_info} -> {best_entity.pii_type}")
+        
+        return best_entity
+    
     def detect_pii_with_bert(self, text: str) -> List[Dict[str, Any]]:
-        """Detect PII using BERT NER model."""
+        """Detect PII using BERT NER model with improved entity merging."""
         if not self.ner_pipeline:
             return []
         
@@ -183,12 +213,14 @@ class PIIDetectorConfigGenerator:
                         "confidence": entity['score'],
                         "source": "BERT"
                     })
-            
+
             return filtered_entities
             
         except Exception as e:
             logger.error(f"Error in BERT PII detection: {e}")
             return []
+    
+   
     
     def _is_valid_bert_entity(self, entity: Dict[str, Any]) -> bool:
         """Filter out false positives from BERT detection."""
@@ -233,144 +265,275 @@ class PIIDetectorConfigGenerator:
         }
         return mapping.get(bert_type, bert_type)
     
-    def detect_pii_with_regex(self, text: str) -> List[Dict[str, Any]]:
-        """Detect PII using regex patterns."""
-        entities = []
-        
-        for pii_type, patterns in self.custom_patterns.items():
-            for pattern in patterns:
-                matches = re.finditer(pattern, text, re.IGNORECASE)
-                for match in matches:
-                    # Additional validation for context-dependent patterns
-                    if self._validate_regex_match(match.group(), pii_type, text, match.start()):
-                        entities.append({
-                            "text": match.group(),
-                            "pii_type": pii_type,
-                            "start": match.start(),
-                            "end": match.end(),
-                            "confidence": 0.9,
-                            "source": "REGEX"
-                        })
-        
-        return entities
-    
-    def _validate_regex_match(self, text: str, pii_type: str, full_text: str, position: int) -> bool:
-        """Validate regex matches using context."""
-        # For 9-digit numbers, check if they might be SSNs
-        if pii_type == "SSN" and len(text) == 9 and text.isdigit():
-            # Look for SSN context keywords nearby
-            context_window = 50
-            start = max(0, position - context_window)
-            end = min(len(full_text), position + len(text) + context_window)
-            context = full_text[start:end].lower()
+    def detect_pii_with_llm(self, text: str, max_chunk_size: int = 4000) -> List[Dict[str, Any]]:
+        """Use LLM to detect PII entities with high accuracy and context awareness."""
+        try:
+            # Split text into chunks if too long
+            chunks = []
+            if len(text) > max_chunk_size:
+                words = text.split()
+                current_chunk = []
+                current_length = 0
+                
+                for word in words:
+                    if current_length + len(word) > max_chunk_size and current_chunk:
+                        chunks.append(" ".join(current_chunk))
+                        current_chunk = [word]
+                        current_length = len(word)
+                    else:
+                        current_chunk.append(word)
+                        current_length += len(word) + 1
+                
+                if current_chunk:
+                    chunks.append(" ".join(current_chunk))
+            else:
+                chunks = [text]
             
-            ssn_keywords = ['ssn', 'social security', 'social security number', 'tax id']
-            return any(keyword in context for keyword in ssn_keywords)
-        
-        # For 12-digit numbers, check if they might be Aadhaar
-        elif pii_type == "AADHAAR" and len(text) == 12 and text.isdigit():
-            context_window = 50
-            start = max(0, position - context_window)
-            end = min(len(full_text), position + len(text) + context_window)
-            context = full_text[start:end].lower()
+            all_entities = []
+            chunk_offset = 0
             
-            aadhaar_keywords = ['aadhaar', 'aadhar', 'uid', 'unique id']
-            return any(keyword in context for keyword in aadhaar_keywords)
-        
-        # For 6-digit numbers, check if they might be PIN codes
-        elif pii_type == "ZIP_CODE" and len(text) == 6 and text.isdigit():
-            context_window = 30
-            start = max(0, position - context_window)
-            end = min(len(full_text), position + len(text) + context_window)
-            context = full_text[start:end].lower()
+            for chunk in chunks:
+                system_prompt = """You are an expert PII (Personally Identifiable Information) detection system with advanced pattern recognition capabilities. Your task is to meticulously analyze the given text and identify ALL types of PII with extremely high precision and comprehensive coverage.
+
+**CRITICAL DETECTION REQUIREMENTS:**
+2. **COMPREHENSIVE COVERAGE**: Do not miss any PII - scan every word, number, and pattern
+3. **CONTEXT AWARENESS**: Use surrounding text to determine if something is actually PII
+4. **EXACT TEXT MATCHING**: Return the exact text as it appears in the document
+5. **PRECISE POSITIONING**: Calculate accurate character positions
+
+**DETAILED PII CATEGORIES TO DETECT:**
+
+**PERSONAL IDENTIFIERS:**
+- PERSON: All types of names (first + last), nicknames, name variations (e.g., "Aaron Mehta", "A. Mehta", "Mr. Jonathan Clarke")
+- SSN: Social Security Numbers (XXX-XX-XXXX format or variations)
+- PASSPORT: Passport numbers (any format with letters/numbers)
+- DRIVER_LICENSE: Driver's license numbers (state-specific formats)
+
+**CONTACT INFORMATION:**
+- EMAIL: All email addresses (any @domain format)
+- PHONE: Phone numbers (all formats: +1 (XXX) XXX-XXXX, +XX-XXXXX-XXXXX, etc.)
+- ADDRESS: Complete addresses, partial addresses, street names, building names, apartment numbers
+- ZIP_CODE: Postal codes, ZIP codes (5-digit, ZIP+4, international formats)
+
+**FINANCIAL DATA:**
+- CREDIT_CARD: Credit card numbers (XXXX-XXXX-XXXX-XXXX or any format)
+- BANK_ACCOUNT: Bank account numbers, routing numbers, IBAN numbers
+- PAN: PAN card numbers (AAAAA0000A format)
+- AADHAAR: Aadhaar numbers (XXXX XXXX XXXX format)
+
+**DATES AND IDENTIFIERS:**
+- DATE_OF_BIRTH: Birth dates (MM/DD/YYYY, DD/MM/YYYY, any date format)
+- EMPLOYEE_ID: Employee IDs, badge numbers (EMP-XXXX-XXXX format)
+- STUDENT_ID: Student ID numbers
+- MEDICAL_RECORD: Medical record numbers (MRN-XXXXXX format)
+- INSURANCE_ID: Insurance policy numbers (INS-XX-XXXXXX-XXXX format)
+- VACCINE_LOT: Vaccine lot numbers (VAX-XXXX-XXXX format)
+- RECEIPT_NUMBER: Receipt numbers (RN-XXXX-XXXXXX format)
+- VOLUNTEER_CODE: Volunteer codes (VOL-XX-XXX format)
+
+**TECHNICAL IDENTIFIERS:**
+- IP_ADDRESS: IP addresses (IPv4: XXX.XXX.XXX.XXX, IPv6 formats)
+- MAC_ADDRESS: MAC addresses (XX:XX:XX:XX:XX:XX format)
+- URL: Website URLs (linkedin.com/in/..., github.com/..., etc.)
+- COORDINATES: GPS coordinates (latitude, longitude pairs)
+
+**LOCATION DATA:**
+- LOC: Locations, cities, states, countries, building names
+- ORG: Organizations, companies, institutions
+- VEHICLE_PLATE: License plate numbers (state-specific formats)
+
+**TRACKING AND CODES:**
+- TRACKING_NUMBER: Tracking numbers (TRK-XXXXXXXXXX format)
+- BARCODE: Barcode numbers (long numeric sequences)
+
+**SPECIAL DETECTION INSTRUCTIONS:**
+1. **MAC Addresses**: Look for patterns like "00:1A:2B:3C:4D:5E" - detect the COMPLETE address
+2. **IP Addresses**: Detect both local (192.168.x.x) and public IP addresses
+3. **Medical Records**: Look for "MRN" followed by numbers or dashes
+4. **Vaccine Data**: Look for "VAX-" prefix or "lot no." followed by codes
+5. **Barcodes**: Long numeric sequences (12+ digits) especially after "barcode"
+6. **Names with Titles**: Include titles like "Mr.", "Ms.", "Dr." with names
+7. **Partial Addresses**: Even fragments like "78, Sunrise Apartments" or "7th Floor, Mumbai"
+8. **Phone Extensions**: Numbers that appear to be phone numbers even without country codes
+
+Return a JSON list with this EXACT format:
+[
+    {
+        "text": "exact_text_as_found_in_document",
+        "pii_type": "SPECIFIC_PII_TYPE",
+        "start": character_start_position,
+        "end": character_end_position,
+        "confidence": confidence_score_0_to_1,
+        "context_info": "surrounding_context_for_validation"
+    }
+]
+
+**VALIDATION CHECKLIST:**
+- ✓ Are all IP addresses (both local and public) detected?
+- ✓ Are all MAC addresses with colons detected?
+- ✓ Are medical record numbers (MRN-XXXXXX) detected?
+- ✓ Are vaccine lot numbers (VAX-XXXX-XXXX) detected?
+- ✓ Are barcode numbers (long numeric sequences) detected?
+- ✓ Are all partial addresses and location references detected?
+- ✓ Are tracking numbers with prefixes detected?
+
+Return ONLY the JSON array, no additional text or explanation."""
+
+                human_prompt = f"Analyze this text for PII:\n\n{chunk}"
+                
+                messages = [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=human_prompt)
+                ]
+                
+                try:
+                    response = self.llm.invoke(messages)
+                    response_text = response.content.strip()
+                    logger.debug(f"LLM Response: {response_text}")
+                    
+                    # Clean up the response to extract JSON - more robust cleaning
+                    if response_text.startswith('```json'):
+                        response_text = response_text[7:]
+                    elif response_text.startswith('```'):
+                        response_text = response_text[3:]
+                    
+                    if response_text.endswith('```'):
+                        response_text = response_text[:-3]
+                    
+                    # Remove any additional markdown formatting
+                    response_text = response_text.strip()
+                    
+                    entities = json.loads(response_text)
+                    
+                    # Adjust positions for chunk offset and validate
+                    for entity in entities:
+                        if isinstance(entity, dict) and 'text' in entity and 'pii_type' in entity:
+                            entity_text = entity['text']
+                            
+                            # More flexible text verification - check if text exists in chunk
+                            # Handle cases where LLM might have slight variations in whitespace
+                            text_found = False
+                            if entity_text in chunk:
+                                text_found = True
+                            else:
+                                # Try normalized text (handle whitespace differences)
+                                normalized_entity = ' '.join(entity_text.split())
+                                normalized_chunk = ' '.join(chunk.split())
+                                if normalized_entity in normalized_chunk:
+                                    text_found = True
+                                    logger.debug(f"Found text with normalization: '{entity_text}'")
+                            
+                            if text_found:
+                                # Adjust positions for global text (if provided)
+                                if 'start' in entity and 'end' in entity:
+                                    entity['start'] += chunk_offset
+                                    entity['end'] += chunk_offset
+                                else:
+                                    # If positions not provided, calculate them
+                                    start_pos = chunk.find(entity_text)
+                                    if start_pos >= 0:
+                                        entity['start'] = start_pos + chunk_offset
+                                        entity['end'] = start_pos + len(entity_text) + chunk_offset
+                                    else:
+                                        # Fallback - use approximate positions
+                                        entity['start'] = chunk_offset
+                                        entity['end'] = chunk_offset + len(entity_text)
+                                
+                                entity['confidence'] = entity.get('confidence', 0.8)
+                                entity['source'] = 'LLM'
+                                
+                                # Handle both 'type' and 'pii_type' keys for consistency
+                                if 'pii_type' not in entity and 'type' in entity:
+                                    entity['pii_type'] = entity.pop('type')
+                                elif 'type' not in entity and 'pii_type' in entity:
+                                    entity['type'] = entity['pii_type']
+                                
+                                all_entities.append(entity)
+                                logger.debug(f"Added entity: '{entity_text}' ({entity['pii_type']})")
+                            else:
+                                logger.warning(f"Could not verify text in chunk: '{entity_text}'")
+                        else:
+                            logger.warning(f"Invalid entity structure: {entity}")
+                    
+                except (json.JSONDecodeError, KeyError, ValueError) as e:
+                    logger.error(f"Failed to parse LLM response for chunk: {e}")
+                    logger.error(f"Response text: {response_text}")
+                    continue
+                
+                chunk_offset += len(chunk) + 1 
             
-            pin_keywords = ['pin', 'pincode', 'postal code', 'zip']
-            return any(keyword in context for keyword in pin_keywords)
-        
-        return True
-    
-    def merge_and_deduplicate_entities(self, entities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Merge overlapping entities and remove duplicates."""
-        if not entities:
+            logger.info(f"LLM detected {len(all_entities)} PII entities")
+            return all_entities
+            
+        except Exception as e:
+            logger.error(f"LLM PII detection failed: {e}")
             return []
-        
-        # Sort by start position
-        sorted_entities = sorted(entities, key=lambda x: x["start"])
-        merged = []
-        
-        for current in sorted_entities:
-            # Check if this entity overlaps with any existing entity
-            merged_with_existing = False
-            
-            for i, existing in enumerate(merged):
-                # Check for overlap
-                if (current["start"] < existing["end"] and current["end"] > existing["start"]):
-                    # Entities overlap - keep the one with higher confidence or more specific type
-                    if (current["confidence"] > existing["confidence"] or 
-                        self._is_more_specific_type(current["pii_type"], existing["pii_type"])):
-                        # Replace existing with current
-                        merged[i] = current
-                    merged_with_existing = True
-                    break
-            
-            if not merged_with_existing:
-                merged.append(current)
-        
-        return merged
-    
-    def _is_more_specific_type(self, type1: str, type2: str) -> bool:
-        """Determine if type1 is more specific than type2."""
-        # Regex-detected specific types are generally more accurate than BERT's general types
-        specific_types = {"SSN", "EMAIL", "PHONE", "CREDIT_CARD", "AADHAAR", "PAN"}
-        general_types = {"PERSON", "ORG", "LOC", "MISC"}
-        
-        return type1 in specific_types and type2 in general_types
     
     def detect_all_pii(self, text: str, page_num: int = 0, doc: fitz.Document = None) -> List[DetectedPII]:
-        """Detect all PII using both BERT and regex methods, including coordinates."""
+        """Detect all PII using LLM first, then BERT for coordinates, with comprehensive validation."""
         all_entities = []
         
-        # Detect with BERT
+        # Step 1: Use LLM for initial comprehensive PII detection
+        logger.info(f"Starting LLM-based PII detection on page {page_num + 1}")
+        llm_entities = self.detect_pii_with_llm(text)
+        all_entities.extend(llm_entities)
+        logger.info(f"LLM detected {len(llm_entities)} entities on page {page_num + 1}")
+        
+        # Log each LLM entity for debugging
+        for i, entity in enumerate(llm_entities):
+            logger.debug(f"LLM Entity {i+1}: '{entity.get('text', 'N/A')}' -> {entity.get('pii_type', 'N/A')}")
+        
+        # Step 2: Use BERT for additional detection and coordinate finding
         if self.ner_pipeline:
             bert_entities = self.detect_pii_with_bert(text)
             all_entities.extend(bert_entities)
-            logger.debug(f"BERT detected {len(bert_entities)} entities on page {page_num + 1}")
+            logger.debug(f"BERT detected {len(bert_entities)} additional entities on page {page_num + 1}")
         
-        # Detect with regex
-        regex_entities = self.detect_pii_with_regex(text)
-        all_entities.extend(regex_entities)
-        logger.debug(f"Regex detected {len(regex_entities)} entities on page {page_num + 1}")
+        validated_entities = all_entities
+        logger.info(f"Total entities before conversion: {len(validated_entities)}")
         
-        # Merge and deduplicate
-        merged_entities = self.merge_and_deduplicate_entities(all_entities)
-        
-        # Convert to DetectedPII objects with coordinates
+        # Step 3: Convert to DetectedPII objects with coordinates
         detected_pii = []
-        for entity in merged_entities:
-            # Find coordinates if document is provided
-            x0, y0, x1, y1 = 0.0, 0.0, 0.0, 0.0
-            if doc:
-                x0, y0, x1, y1 = self.find_text_coordinates(
-                    doc, page_num, entity["text"], 
-                    entity["start"], entity["end"]
+        for i, entity in enumerate(validated_entities):
+            try:
+                # Ensure required fields exist
+                if not all(key in entity for key in ["text", "pii_type", "start", "end"]):
+                    logger.warning(f"Skipping entity {i+1} due to missing required fields: {entity}")
+                    continue
+                
+                # Find coordinates if document is provided
+                x0, y0, x1, y1 = 0.0, 0.0, 0.0, 0.0
+                if doc:
+                    x0, y0, x1, y1 = self.find_text_coordinates(
+                        doc, page_num, entity["text"], 
+                        entity["start"], entity["end"]
+                    )
+                
+                # Use suggested strategy from LLM validation if available
+                suggested_strategy = entity.get('suggested_strategy', 
+                                              self._suggest_masking_strategy(entity["pii_type"], entity["text"]))
+                
+                pii = DetectedPII(
+                    text=entity["text"],
+                    pii_type=entity["pii_type"],
+                    confidence=entity.get("confidence", 0.8),
+                    start=entity["start"],
+                    end=entity["end"],
+                    page_num=page_num,
+                    suggested_strategy=suggested_strategy,
+                    x0=x0,
+                    y0=y0,
+                    x1=x1,
+                    y1=y1
                 )
-            
-            pii = DetectedPII(
-                text=entity["text"],
-                pii_type=entity["pii_type"],
-                confidence=entity["confidence"],
-                start=entity["start"],
-                end=entity["end"],
-                page_num=page_num,
-                suggested_strategy=self._suggest_masking_strategy(entity["pii_type"], entity["text"]),
-                x0=x0,
-                y0=y0,
-                x1=x1,
-                y1=y1
-            )
-            detected_pii.append(pii)
+                detected_pii.append(pii)
+                logger.debug(f"Converted entity {i+1}: '{pii.text}' -> {pii.pii_type} ({pii.suggested_strategy})")
+                
+            except Exception as e:
+                logger.error(f"Error converting entity {i+1}: {entity} - Error: {e}")
+                continue
         
-        logger.info(f"Page {page_num + 1}: Found {len(detected_pii)} unique PII entities with coordinates")
+        logger.info(f"Page {page_num + 1}: Converted {len(detected_pii)} entities to DetectedPII objects")
         return detected_pii
     
     def extract_text_from_pdf(self, pdf_path: str) -> List[Tuple[str, int]]:
@@ -413,7 +576,7 @@ class PIIDetectorConfigGenerator:
     
     def find_text_coordinates(self, doc: fitz.Document, page_num: int, text: str, start_char: int, end_char: int) -> Tuple[float, float, float, float]:
         """
-        Find the exact coordinates of text on a PDF page.
+        Find the exact coordinates of text on a PDF page with improved precision.
         
         Args:
             doc: PyMuPDF document object
@@ -428,14 +591,37 @@ class PIIDetectorConfigGenerator:
         try:
             page = doc[page_num]
             
-            # Method 1: Direct text search
-            text_instances = page.search_for(text)
-            if text_instances:
-                # Return the first match (most likely correct)
-                rect = text_instances[0]
-                return (rect.x0, rect.y0, rect.x1, rect.y1)
+            # Method 1: Direct text search - try multiple variations
+            text_variations = [
+                text,
+                text.strip(),
+                ' '.join(text.split()),  # Normalize whitespace
+            ]
             
-            # Method 2: Use text blocks to find approximate position
+            for text_variant in text_variations:
+                text_instances = page.search_for(text_variant)
+                if text_instances:
+                    # Return the first match (most likely correct)
+                    rect = text_instances[0]
+                    logger.debug(f"Found direct match for '{text_variant}': ({rect.x0:.2f}, {rect.y0:.2f}, {rect.x1:.2f}, {rect.y1:.2f})")
+                    return (rect.x0, rect.y0, rect.x1, rect.y1)
+            
+            # Method 2: Use character position mapping with improved accuracy
+            page_text = page.get_text()
+            
+            # Find the actual text at the given positions
+            if start_char < len(page_text) and end_char <= len(page_text):
+                actual_text = page_text[start_char:end_char]
+                
+                # Try searching for the actual extracted text
+                if actual_text.strip():
+                    text_instances = page.search_for(actual_text.strip())
+                    if text_instances:
+                        rect = text_instances[0]
+                        logger.debug(f"Found position-based match for '{actual_text.strip()}': ({rect.x0:.2f}, {rect.y0:.2f}, {rect.x1:.2f}, {rect.y1:.2f})")
+                        return (rect.x0, rect.y0, rect.x1, rect.y1)
+            
+            # Method 3: Use text blocks to find approximate position with better mapping
             blocks = page.get_text("dict")
             
             current_char = 0
@@ -447,6 +633,7 @@ class PIIDetectorConfigGenerator:
                     continue
                     
                 for line in block["lines"]:
+                    line_start_char = current_char
                     line_text = ""
                     line_spans = []
                     
@@ -457,22 +644,55 @@ class PIIDetectorConfigGenerator:
                         current_char += len(span_text)
                     
                     # Add newline character
+                    line_end_char = current_char
                     current_char += 1
                     
                     # Check if our target text falls within this line
-                    if target_start < current_char and target_end <= current_char:
-                        # Find the specific span(s) containing our text
+                    if (target_start >= line_start_char and target_start < line_end_char):
+                        # Found the line containing our text
+                        
+                        # Try to find the exact span
                         for span, span_start, span_end in line_spans:
-                            if (target_start >= span_start and target_start < span_end) or \
-                               (target_end > span_start and target_end <= span_end):
-                                # Found the span containing our text
+                            if (target_start >= span_start and target_start < span_end):
                                 bbox = span.get("bbox", [0, 0, 0, 0])
-                                return (bbox[0], bbox[1], bbox[2], bbox[3])
+                                
+                                # If the entity spans multiple spans, try to get better coordinates
+                                if target_end > span_end:
+                                    # Find the last span
+                                    last_bbox = bbox
+                                    for span2, span_start2, span_end2 in line_spans:
+                                        if target_end <= span_end2 and span_start2 >= span_start:
+                                            last_bbox = span2.get("bbox", bbox)
+                                    
+                                    # Combine bboxes
+                                    final_bbox = (bbox[0], bbox[1], last_bbox[2], max(bbox[3], last_bbox[3]))
+                                    logger.debug(f"Found multi-span match: {final_bbox}")
+                                    return final_bbox
+                                else:
+                                    logger.debug(f"Found single-span match: {bbox}")
+                                    return (bbox[0], bbox[1], bbox[2], bbox[3])
             
-            # Method 3: Fallback - return approximate coordinates based on page size
+            # Method 4: Partial word matching for names that might be split
+            words = text.split()
+            if len(words) > 1:
+                # Try to find coordinates for the first word and estimate the full extent
+                first_word_instances = page.search_for(words[0])
+                last_word_instances = page.search_for(words[-1])
+                
+                if first_word_instances and last_word_instances:
+                    # Find the best combination that could represent our full text
+                    for first_rect in first_word_instances:
+                        for last_rect in last_word_instances:
+                            # Check if they're on the same line (similar y coordinates)
+                            if abs(first_rect.y0 - last_rect.y0) < 5 and first_rect.x0 <= last_rect.x1:
+                                combined_rect = (first_rect.x0, first_rect.y0, last_rect.x1, max(first_rect.y1, last_rect.y1))
+                                logger.debug(f"Found word-combination match for '{text}': {combined_rect}")
+                                return combined_rect
+            
+            # Method 5: Fallback - return approximate coordinates based on page size
             logger.warning(f"Could not find exact coordinates for text: '{text}'")
             page_rect = page.rect
-            return (50, 50, page_rect.width - 50, 80)  # Default rectangle
+            return (50, 50, min(200 + len(text) * 6, page_rect.width - 50), 80)  # Estimate based on text length
             
         except Exception as e:
             logger.warning(f"Error finding coordinates for text '{text}': {e}")
@@ -483,17 +703,43 @@ class PIIDetectorConfigGenerator:
                            interactive: bool = False) -> Dict[str, Any]:
         """Generate configuration file for bert_pii_masker.py"""
         
-        if interactive:
-            detected_pii = self._interactive_strategy_selection(detected_pii)
+        logger.info(f"Starting config generation with {len(detected_pii)} detected PII entities")
         
-        # Remove duplicates while preserving order
-        unique_pii = []
-        seen_texts = set()
+        # Smart deduplication - consolidate same text with different PII types
+        text_to_entities = {}
         
+        # Group entities by text and page
         for pii in detected_pii:
-            if pii.text not in seen_texts:
-                unique_pii.append(pii)
-                seen_texts.add(pii.text)
+            normalized_text = pii.text.strip().lower()
+            key = (normalized_text, pii.page_num)
+            
+            if key not in text_to_entities:
+                text_to_entities[key] = []
+            text_to_entities[key].append(pii)
+        
+        # For each group, select the most appropriate PII type
+        unique_pii = []
+        
+        for (normalized_text, page_num), entities in text_to_entities.items():
+            if len(entities) == 1:
+                # No duplicates, keep as is
+                unique_pii.append(entities[0])
+                logger.debug(f"Added single entity: '{entities[0].text}' ({entities[0].pii_type})")
+            else:
+                # Multiple entities with same text - choose the most specific/appropriate one
+                best_entity = self._select_best_entity_type(entities)
+                unique_pii.append(best_entity)
+                
+                entity_types = [e.pii_type for e in entities]
+                logger.debug(f"Consolidated '{best_entity.text}': {entity_types} -> {best_entity.pii_type}")
+        
+        # Sort by page number and then by y-coordinate for consistent output
+        unique_pii.sort(key=lambda x: (x.page_num, x.y0, x.x0))
+        logger.info(f"After smart deduplication: {len(unique_pii)} unique PII entities")
+        
+        # Log all entities being added to config
+        for pii in unique_pii:
+            logger.debug(f"Config entry: '{pii.text}' -> {pii.pii_type}:{pii.suggested_strategy}")
         
         config_lines = [
             "# PII Masking Configuration File with Coordinates",
@@ -542,61 +788,6 @@ class PIIDetectorConfigGenerator:
         logger.info(f"Configuration file saved to: {output_path}")
         return stats
     
-    def _interactive_strategy_selection(self, detected_pii: List[DetectedPII]) -> List[DetectedPII]:
-        """Allow user to interactively select masking strategies."""
-        print("\n" + "="*60)
-        print("INTERACTIVE STRATEGY SELECTION")
-        print("="*60)
-        print("Review detected PII and choose masking strategies:")
-        print()
-        
-        updated_pii = []
-        
-        for i, pii in enumerate(detected_pii, 1):
-            print(f"{i}. Text: '{pii.text}'")
-            print(f"   Type: {pii.pii_type}")
-            print(f"   Page: {pii.page_num + 1}")
-            print(f"   Confidence: {pii.confidence:.2f}")
-            print(f"   Coordinates: ({pii.x0:.1f}, {pii.y0:.1f}) to ({pii.x1:.1f}, {pii.y1:.1f})")
-            print(f"   Suggested Strategy: {pii.suggested_strategy}")
-            print()
-            print("   Available strategies:")
-            print("   1. redact - Complete redaction (black box)")
-            print("   2. mask - Replace with asterisks/patterns")
-            print("   3. pseudo - Replace with realistic fake data")
-            print("   4. skip - Don't mask this PII")
-            print()
-            
-            while True:
-                choice = input(f"   Choose strategy for '{pii.text}' (1-4, or Enter for suggested): ").strip()
-                
-                if choice == "" or choice == "1":
-                    if choice == "":
-                        strategy = pii.suggested_strategy
-                    else:
-                        strategy = "redact"
-                    break
-                elif choice == "2":
-                    strategy = "mask"
-                    break
-                elif choice == "3":
-                    strategy = "pseudo"
-                    break
-                elif choice == "4":
-                    print("   Skipping this PII...")
-                    strategy = None
-                    break
-                else:
-                    print("   Invalid choice. Please enter 1, 2, 3, 4, or press Enter.")
-            
-            if strategy:
-                pii.suggested_strategy = strategy
-                updated_pii.append(pii)
-            
-            print("-" * 60)
-        
-        print(f"\nSelected {len(updated_pii)} PII entities for masking.")
-        return updated_pii
     
     def process_pdf(self, pdf_path: str, output_config_path: str, interactive: bool = False) -> Dict[str, Any]:
         """Process PDF and generate configuration file with coordinates."""

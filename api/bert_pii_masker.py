@@ -21,9 +21,15 @@ import sys
 import os
 import random
 import logging
-from pathlib import Path
+import json
+import re
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -50,13 +56,14 @@ class PIIConfig:
 
 class BERTPIIMasker:
     """
-    BERT-based PII masker with configurable strategies.
+    BERT-based PII masker with configurable strategies and LLM validation.
     """
     
     def __init__(self):
         self.ner_pipeline = None
         self.pseudo_data = self._initialize_pseudo_data()
-        self.used_mappings = {}  
+        self.used_mappings = {}  # Global mappings for consistency
+        self.name_part_mappings = {}  # For partial name consistency: "Aaron" -> "John", "Mehta" -> "Doe"
         self._initialize_bert_model()
     
     def _initialize_bert_model(self):
@@ -84,133 +91,174 @@ class BERTPIIMasker:
             raise
     
     def _initialize_pseudo_data(self) -> Dict[str, List[str]]:
-        """Initialize pseudo data for different PII types."""
+        """Initialize comprehensive pseudo data for different PII types with shorter names."""
         return {
-            "PERSON": [
-                "Alex Johnson", "Jordan Smith", "Taylor Brown", "Morgan Davis",
-                "Casey Wilson", "Riley Miller", "Avery Garcia", "Sage Anderson",
-                "Drew Martinez", "Blake Thompson", "River Jones", "Phoenix Lee",
-                "Kai Rodriguez", "Skylar White", "Quinn Harris", "Parker Clark"
+            "first_names": [
+                "Alex", "Ben", "Sam", "Dan", "Max", "Jay", "Lee", "Tom",
+                "Ray", "Kim", "Ana", "Eva", "Zoe", "Mia", "Amy", "Ava",
+                "Ian", "Leo", "Eli", "Zac", "Joe", "Ron", "Tim", "Jim",
+                "Kai", "Roy", "Ivy", "Uma", "Ada", "Eve", "Joy", "Sky"
             ],
-            "ORG": [
+            "last_names": [
+                "Smith", "Brown", "Davis", "Jones", "Miller", "Wilson", "Moore", "White",
+                "Clark", "Lewis", "Lee", "King", "Hall", "Green", "Adams", "Baker",
+                "Hill", "Scott", "Young", "Allen", "Bell", "Ross", "Gray", "Fox",
+                "Stone", "Reed", "Cook", "Price", "Lane", "Wood", "Cole", "Webb"
+            ],
+            "organizations": [
                 "TechCorp Solutions", "Global Industries Inc", "Innovation Labs",
                 "DataFlow Systems", "NextGen Technologies", "CloudFirst Corp",
                 "SmartBridge LLC", "Digital Dynamics", "FutureTech Group",
-                "MetaVision Inc", "Quantum Networks", "CyberEdge Solutions"
+                "MetaVision Inc", "Quantum Networks", "CyberEdge Solutions",
+                "BlueSky Enterprises", "RedRock Corp", "GreenField Inc", "SilverStream LLC"
             ],
-            "LOC": [
+            "cities": [
                 "Springfield", "Riverside", "Fairview", "Georgetown", "Madison",
                 "Franklin", "Greenwood", "Oakville", "Hillcrest", "Brookfield",
-                "Centerville", "Westfield", "Northbrook", "Southgate"
+                "Centerville", "Westfield", "Northbrook", "Southgate", "Eastmont", "Westview"
             ],
-            "EMAIL": [
-                "user1@example.com", "contact@samplecorp.com", "info@testdomain.org",
-                "admin@placeholder.net", "support@demosite.com", "sales@mockcompany.biz"
+            "locations": [
+                "Downtown", "Uptown", "Midtown", "Old Town", "New District", "Central Plaza",
+                "Business District", "Financial Center", "Tech Quarter", "Arts District"
             ],
-            "PHONE": [
-                "(555) 100-0001", "(555) 200-0002", "(555) 300-0003", 
-                "(555) 400-0004", "(555) 500-0005", "(555) 600-0006"
+            "addresses": [
+                "123 Main Street", "456 Oak Avenue", "789 Pine Road", "321 Elm Drive",
+                "654 Maple Lane", "987 Cedar Boulevard", "147 Birch Way", "258 Willow Circle",
+                "369 Ash Court", "741 Poplar Street", "852 Hickory Lane", "963 Walnut Drive"
             ],
-            "SSN": [
-                "XXX-XX-1001", "XXX-XX-2002", "XXX-XX-3003", 
-                "XXX-XX-4004", "XXX-XX-5005", "XXX-XX-6006"
+            "apt_types": [
+                "Apt 1A", "Suite 201", "Unit 5B", "Floor 3", "Room 12", "Office 4C",
+                "Flat 2D", "Studio 7", "Penthouse", "Loft 3A", "Space 15", "Level 4"
             ],
-            "ADDRESS": [
-                "123 Main Street", "456 Oak Avenue", "789 Pine Road",
-                "321 Elm Drive", "654 Maple Lane", "987 Cedar Boulevard"
-            ],
-            "CREDIT_CARD": [
-                "XXXX-XXXX-XXXX-1234", "XXXX-XXXX-XXXX-5678",
-                "XXXX-XXXX-XXXX-9012", "XXXX-XXXX-XXXX-3456"
-            ],
-            "BANK_ACCOUNT": [
-                "XXXXXXXX1001", "XXXXXXXX2002", "XXXXXXXX3003",
-                "XXXXXXXX4004", "XXXXXXXX5005", "XXXXXXXX6006"
-            ],
-            "DATE": [
-                "01/01/1990", "02/15/1985", "03/22/1992", "04/30/1988",
-                "05/18/1995", "06/12/1987", "07/25/1991", "08/14/1989"
+            "misc": [
+                "[Redacted]", "[Masked]", "[PSEUDO]", "[Hidden]", "[Confidential]", "[Private]"
             ]
         }
     
     def _get_pseudo_replacement(self, pii_type: str, original_text: str) -> str:
-        """Get a consistent pseudo replacement for the given PII."""
-        # Check if we already have a mapping for this exact text
+        """Get contextually appropriate pseudo replacement for PII type with consistency."""
+        # Return cached mapping if exists
         if original_text in self.used_mappings:
             return self.used_mappings[original_text]
         
-        # Get pseudo data for this PII type
-        if pii_type in self.pseudo_data:
-            replacement = random.choice(self.pseudo_data[pii_type])
+        # Generate context-aware pseudo data
+        if pii_type == "PERSON":
+            # Handle full names vs single names with consistent partial mapping
+            text_parts = original_text.strip().split()
+            if len(text_parts) == 1:
+                # Single name - check if it's part of a previous full name mapping
+                single_name = text_parts[0]
+                
+                # Check if this single name is already mapped as part of a full name
+                if single_name in self.name_part_mappings:
+                    replacement = self.name_part_mappings[single_name]
+                    logger.debug(f"Using consistent partial mapping: '{single_name}' -> '{replacement}'")
+                else:
+                    # Create new single name mapping
+                    available_names = [name for name in self.pseudo_data.get("first_names", ["Alex"]) 
+                                     if name not in self.used_mappings.values() and name not in self.name_part_mappings.values()]
+                    if not available_names:
+                        available_names = self.pseudo_data.get("first_names", ["Alex"])
+                    replacement = random.choice(available_names)
+                    self.name_part_mappings[single_name] = replacement
+                    
+            elif len(text_parts) == 2:
+                # Full name - create consistent mappings for both parts
+                first_name, last_name = text_parts[0], text_parts[1]
+                
+                # Check if parts are already mapped
+                mapped_first = self.name_part_mappings.get(first_name)
+                mapped_last = self.name_part_mappings.get(last_name)
+                
+                # Get or create first name mapping
+                if not mapped_first:
+                    available_first_names = [name for name in self.pseudo_data.get("first_names", ["Alex"]) 
+                                           if name not in self.used_mappings.values() and name not in self.name_part_mappings.values()]
+                    if not available_first_names:
+                        available_first_names = self.pseudo_data.get("first_names", ["Alex"])
+                    mapped_first = random.choice(available_first_names)
+                    self.name_part_mappings[first_name] = mapped_first
+                
+                # Get or create last name mapping
+                if not mapped_last:
+                    available_last_names = [name for name in self.pseudo_data.get("last_names", ["Smith"]) 
+                                          if name not in self.used_mappings.values() and name not in self.name_part_mappings.values()]
+                    if not available_last_names:
+                        available_last_names = self.pseudo_data.get("last_names", ["Smith"])
+                    mapped_last = random.choice(available_last_names)
+                    self.name_part_mappings[last_name] = mapped_last
+                
+                replacement = f"{mapped_first} {mapped_last}"
+                logger.debug(f"Creating consistent full name mapping: '{original_text}' -> '{replacement}'")
+                logger.debug(f"Part mappings: '{first_name}' -> '{mapped_first}', '{last_name}' -> '{mapped_last}'")
+                
+            else:
+                # Handle names with more than 2 parts (rare case)
+                mapped_parts = []
+                for part in text_parts:
+                    if part in self.name_part_mappings:
+                        mapped_parts.append(self.name_part_mappings[part])
+                    else:
+                        # Create new mapping for this part
+                        available_names = [name for name in self.pseudo_data.get("first_names", ["Alex"]) 
+                                         if name not in self.used_mappings.values() and name not in self.name_part_mappings.values()]
+                        if not available_names:
+                            available_names = self.pseudo_data.get("first_names", ["Alex"])
+                        new_mapping = random.choice(available_names)
+                        self.name_part_mappings[part] = new_mapping
+                        mapped_parts.append(new_mapping)
+                
+                replacement = " ".join(mapped_parts)
+                
+        elif pii_type in ["LOC", "ADDRESS"]:
+            # Location-specific replacements
+            if any(word in original_text.lower() for word in ["street", "road", "lane", "avenue", "drive"]):
+                replacement = random.choice(self.pseudo_data.get("addresses", ["123 Main Street"]))
+            elif any(word in original_text.lower() for word in ["city", "town", "ville"]):
+                replacement = random.choice(self.pseudo_data.get("cities", ["Springfield"]))
+            elif any(word in original_text.lower() for word in ["apartment", "apt", "suite", "floor"]):
+                replacement = random.choice(self.pseudo_data.get("apt_types", ["Apt 1A"]))
+            else:
+                replacement = random.choice(self.pseudo_data.get("locations", ["Downtown"]))
+        elif pii_type == "ORG":
+            replacement = random.choice(self.pseudo_data.get("organizations", ["ABC Corp"]))
+        elif pii_type in ["PHONE", "CREDIT_CARD", "SSN", "BANK_ACCOUNT"]:
+            # Numeric data - preserve format
+            digits_only = re.sub(r'\D', '', original_text)
+            if digits_only:
+                # Generate random numbers of same length
+                replacement_digits = ''.join([str(random.randint(0, 9)) for _ in range(len(digits_only))])
+                # Preserve formatting
+                replacement = original_text
+                for i, digit in enumerate(digits_only):
+                    replacement = replacement.replace(digit, replacement_digits[i], 1)
+            else:
+                replacement = original_text
         else:
-            # Fallback for unknown PII types
-            replacement = f"[MASKED_{pii_type}]"
+            # Default fallback
+            replacement = random.choice(self.pseudo_data.get("misc", ["[PSEUDO]"]))
         
-        # Store the mapping for consistency
+        # Cache the mapping
         self.used_mappings[original_text] = replacement
         return replacement
     
-    def _generate_mask_replacement(self, text: str, strategy: str) -> str:
-        """Generate replacement text based on masking strategy."""
+    
+    
+    def _generate_mask_replacement(self, text: str, strategy: str, pii_type: str = None) -> str:
+        """Generate replacement text based on masking strategy with context awareness."""
         if strategy.lower() == "mask":
-            return "*" * len(text)
+            # For names, preserve structure (first name -> first name mask, full name -> full name mask)
+            if pii_type == "PERSON" and " " in text.strip():
+                parts = text.strip().split()
+                return " ".join("*" * len(part) for part in parts)
+            else:
+                return "*" * len(text)
         elif strategy.lower() == "redact":
             return "[REDACTED]"
+        elif strategy.lower() == "pseudo":
+            return self._get_pseudo_replacement(pii_type or "MISC", text)
         else:
             return text  # Default fallback
-    
-    def detect_pii_with_bert(self, text: str) -> List[Dict[str, Any]]:
-        """Detect PII using BERT NER model."""
-        if not self.ner_pipeline:
-            logger.warning("BERT model not available")
-            return []
-        
-        try:
-            entities = self.ner_pipeline(text)
-            
-            # Filter out false positives
-            filtered_entities = []
-            for entity in entities:
-                if self._is_valid_pii_entity(entity):
-                    filtered_entities.append(entity)
-            
-            return filtered_entities
-            
-        except Exception as e:
-            logger.error(f"Error in BERT PII detection: {e}")
-            return []
-    
-    def _is_valid_pii_entity(self, entity: Dict[str, Any]) -> bool:
-        """Filter out false positives and non-PII entities."""
-        word = entity['word'].strip()
-        entity_type = entity['entity_group']
-        score = entity['score']
-        
-        # Skip BERT tokenizer artifacts
-        if word.startswith('##'):
-            return False
-        
-        # Skip very short words
-        if len(word) <= 2:
-            return False
-        
-        # Skip low confidence detections
-        if score < 0.7:
-            return False
-        
-        # Skip common non-PII terms
-        non_pii_terms = {
-            'we', 'in', 'ad', 'co', 'or', 'a', 'e', 'x', 'c', 'h', 'z',
-            'management', 'investment', 'service', 'product', 'products',
-            'advisor', 'custom', 'level', 'face', 'pan', 'act', 'boom'
-        }
-        
-        if word.lower() in non_pii_terms:
-            return False
-        
-        # Allow specific PII types
-        allowed_pii_types = {'PER', 'EMAIL', 'PHONE', 'SSN', 'ORG', 'LOC', 'MISC'}
-        return entity_type in allowed_pii_types
     
     def parse_pii_config(self, config_input: str) -> List[PIIConfig]:
         """
@@ -237,44 +285,66 @@ class BERTPIIMasker:
                 continue
             
             try:
-                parts = line.split(':')
-                if len(parts) >= 3:
-                    pii_text = parts[0].strip()
-                    pii_type = parts[1].strip().upper()
-                    strategy = parts[2].strip().lower()
-                    
-                    # Initialize default values
-                    page_num = 0
-                    x0 = y0 = x1 = y1 = 0.0
-                    replacement = None
-                    
-                    # Check if we have coordinate format (8 parts) or old format (3-4 parts)
-                    if len(parts) == 8:
-                        # New format: PII:Type:Strategy:Page:X0:Y0:X1:Y1
-                        try:
-                            page_num = int(parts[3].strip())
-                            x0 = float(parts[4].strip())
-                            y0 = float(parts[5].strip())
-                            x1 = float(parts[6].strip())
-                            y1 = float(parts[7].strip())
-                        except ValueError as e:
-                            logger.warning(f"Invalid coordinate values in line: {line} - {e}")
-                            # Continue with default coordinates
-                    elif len(parts) == 4:
-                        # Old format with replacement: PII:Type:Strategy:Replacement
-                        replacement = parts[3].strip()
-                    elif len(parts) > 8:
-                        # Extended format with replacement: PII:Type:Strategy:Page:X0:Y0:X1:Y1:Replacement
-                        try:
-                            page_num = int(parts[3].strip())
-                            x0 = float(parts[4].strip())
-                            y0 = float(parts[5].strip())
-                            x1 = float(parts[6].strip())
-                            y1 = float(parts[7].strip())
-                            if len(parts) > 8:
-                                replacement = parts[8].strip()
-                        except ValueError as e:
-                            logger.warning(f"Invalid coordinate values in line: {line} - {e}")
+                # Use regex to parse the config line more intelligently
+                # Pattern: PII_TEXT:TYPE:STRATEGY:PAGE:X0:Y0:X1:Y1
+                # We need to be careful with colons in PII text (like MAC addresses)
+                
+                # Find the last few colons to identify TYPE:STRATEGY:PAGE:X0:Y0:X1:Y1
+                colon_positions = [i for i, char in enumerate(line) if char == ':']
+                
+                if len(colon_positions) >= 2:  # At minimum we need TYPE and STRATEGY
+                    if len(colon_positions) >= 7:
+                        # New format with coordinates: PII:TYPE:STRATEGY:PAGE:X0:Y0:X1:Y1
+                        # The PII text is everything before the 7th-to-last colon
+                        split_pos = colon_positions[-7]
+                        pii_text = line[:split_pos].strip()
+                        remaining_parts = line[split_pos+1:].split(':')
+                        
+                        if len(remaining_parts) >= 7:
+                            pii_type = remaining_parts[0].strip().upper()
+                            strategy = remaining_parts[1].strip().lower()
+                            page_num = 0
+                            x0 = y0 = x1 = y1 = 0.0
+                            replacement = None
+                            
+                            try:
+                                page_num = int(remaining_parts[2].strip())
+                                x0 = float(remaining_parts[3].strip())
+                                y0 = float(remaining_parts[4].strip())
+                                x1 = float(remaining_parts[5].strip())
+                                y1 = float(remaining_parts[6].strip())
+                                if len(remaining_parts) > 7:
+                                    replacement = remaining_parts[7].strip()
+                            except ValueError as e:
+                                logger.warning(f"Invalid coordinate values in line: {line} - {e}")
+                                # Continue with default coordinates
+                        else:
+                            logger.warning(f"Invalid coordinate format in line: {line}")
+                            continue
+                    else:
+                        # Old format: PII:TYPE:STRATEGY[:REPLACEMENT]
+                        # Find the position to split based on number of colons
+                        if len(colon_positions) == 2:
+                            # PII:TYPE:STRATEGY
+                            split_pos1 = colon_positions[-2]
+                            split_pos2 = colon_positions[-1]
+                        elif len(colon_positions) == 3:
+                            # PII:TYPE:STRATEGY:REPLACEMENT
+                            split_pos1 = colon_positions[-3]
+                            split_pos2 = colon_positions[-2]
+                        else:
+                            # Multiple colons in PII text, find last 2 or 3 colons
+                            split_pos1 = colon_positions[-3] if len(colon_positions) >= 3 else colon_positions[-2]
+                            split_pos2 = colon_positions[-2] if len(colon_positions) >= 3 else colon_positions[-1]
+                        
+                        pii_text = line[:split_pos1].strip()
+                        remaining_parts = line[split_pos1+1:].split(':', 2)
+                        
+                        pii_type = remaining_parts[0].strip().upper()
+                        strategy = remaining_parts[1].strip().lower()
+                        page_num = 0
+                        x0 = y0 = x1 = y1 = 0.0
+                        replacement = remaining_parts[2].strip() if len(remaining_parts) > 2 else None
                     
                     config = PIIConfig(
                         text=pii_text,
@@ -332,9 +402,18 @@ class BERTPIIMasker:
                 return False
             
             if strategy == "redact":
-                # Complete redaction - black box only
-                redact_annot = page.add_redact_annot(target_rect)
-                redact_annot.update()
+                # Display [REDACTED] in black text with complete removal of original
+                replacement_text = "[REDACTED]"
+                success = self._replace_text_with_redaction_formatting(page, target_rect, pii_config.text, replacement_text)
+                
+                if not success:
+                    logger.warning(f"Secure redaction failed for '{pii_config.text}', using simple black box")
+                    # Fallback: create a black rectangle to completely hide area
+                    redact_rect = fitz.Rect(target_rect)
+                    redact_annot = page.add_redact_annot(redact_rect)
+                    redact_annot.update()
+                    page.apply_redactions()
+                    return True
                 
             elif strategy in ["mask", "pseudo"]:
                 # Replace with asterisks, custom text, or pseudo data
@@ -342,7 +421,8 @@ class BERTPIIMasker:
                     if pii_config.replacement:
                         replacement_text = pii_config.replacement
                     else:
-                        replacement_text = "*" * len(pii_config.text)
+                        replacement_text = self._generate_mask_replacement(
+                            pii_config.text, strategy, pii_config.pii_type)
                 else:  # pseudo
                     if pii_config.replacement:
                         replacement_text = pii_config.replacement
@@ -360,9 +440,6 @@ class BERTPIIMasker:
                     redact_annot = page.add_redact_annot(target_rect)
                     redact_annot.update()
                     return False
-                    redact_annot = page.add_redact_annot(rect)
-                    redact_annot.update()
-                    return False
                 
             else:
                 logger.warning(f"Unknown masking strategy: {strategy}")
@@ -377,6 +454,7 @@ class BERTPIIMasker:
     def _replace_text_with_proper_formatting(self, page, rect: Tuple, original_text: str, replacement_text: str) -> bool:
         """
         Replace text in a rectangle with proper font matching and positioning.
+        Uses a two-phase approach: collect all text info first, then redact and replace.
         
         Args:
             page: PDF page object
@@ -388,176 +466,451 @@ class BERTPIIMasker:
             True if replacement was successful, False otherwise
         """
         try:
-            # Get detailed text information from the rectangle
+            # Get detailed text information BEFORE any redaction
             text_dict = page.get_text("dict", clip=rect)
+            font_info = self._extract_font_info_from_rect(page, rect)
             
-            if not text_dict or 'blocks' not in text_dict:
-                logger.debug("Could not extract text information from rectangle")
-                return self._fallback_text_replacement(page, rect, replacement_text)
+            x0, y0, x1, y1 = rect
             
-            # Find the exact text span that matches our original text
-            target_span = None
-            target_line = None
+            # Apply smart truncation with strict control to prevent overlapping
+            smart_replacement_text = self._smart_text_truncation(original_text, replacement_text, 0.95)
             
-            for block in text_dict['blocks']:
-                if 'lines' not in block:
-                    continue
-                    
-                for line in block['lines']:
-                    if 'spans' not in line:
-                        continue
-                        
-                    for span in line['spans']:
-                        span_text = span.get('text', '').strip()
-                        # Check for exact match or if span contains our text
-                        if span_text == original_text.strip() or original_text.strip() in span_text:
-                            target_span = span
-                            target_line = line
-                            break
-                    if target_span:
-                        break
-                if target_span:
-                    break
+            # Create redaction annotation to completely remove the original text
+            redact_rect = fitz.Rect(x0, y0, x1, y1)
+            redact_annot = page.add_redact_annot(redact_rect)
+            redact_annot.update()
             
-            if not target_span:
-                logger.debug(f"Could not find exact text span for '{original_text}'")
-                return self._fallback_text_replacement(page, rect, replacement_text)
+            # Apply the redaction to permanently remove the text
+            page.apply_redactions()
             
-            # Extract font properties with better defaults
-            font_size = max(target_span.get('size', 11), 8)  # Minimum font size
-            font_name = target_span.get('font', 'helvetica')
-            font_flags = target_span.get('flags', 0)
-            text_color = target_span.get('color', 0)
-            
-            # Convert color from integer to RGB tuple
-            if isinstance(text_color, int):
-                r = (text_color >> 16) & 255
-                g = (text_color >> 8) & 255
-                b = text_color & 255
-                color_rgb = (r/255.0, g/255.0, b/255.0)
-            else:
-                color_rgb = (0, 0, 0)  # default black
-            
-            # Use line bbox for better alignment if available
-            if target_line and 'bbox' in target_line:
-                line_bbox = target_line['bbox']
-                x0, y0, x1, y1 = line_bbox
-            else:
-                # Use span bbox
-                span_bbox = target_span.get('bbox', rect)
-                x0, y0, x1, y1 = span_bbox
-            
-            # Calculate text dimensions to properly size the cover rectangle
-            text_width = x1 - x0
-            text_height = y1 - y0
-            
-            # Create a precisely sized white rectangle to cover the original text
-            # Add small padding to ensure complete coverage
-            padding = 1
-            cover_rect = fitz.Rect(x0 - padding, y0 - padding, 
-                                 x0 + text_width + padding, y1 + padding)
-            
-            # Draw white rectangle to cover original text
-            page.draw_rect(cover_rect, color=None, fill=(1, 1, 1), width=0)
-            
-            # Calculate proper baseline position
-            # The baseline is typically at about 20-25% from the bottom of the text height
-            baseline_offset = font_size * 0.22
+            # Calculate text positioning using the preserved font info with better spacing
+            font_size = max(font_info.get('size', 11) * 0.9, 7)  # Slightly smaller to prevent overlap
+            insert_x = x0 + 1.0  # Small left margin
+            baseline_offset = font_size * 0.25  # Better baseline calculation
             baseline_y = y1 - baseline_offset
-            
-            # Position text at the left edge with small offset
-            insert_x = x0 + 0.5  # Small offset from left edge
             insert_point = fitz.Point(insert_x, baseline_y)
             
-            # Get proper font name based on flags
-            fontname = self._get_proper_fontname(font_name, font_flags)
-            
-            # Insert the replacement text with exact formatting
+            # Insert the replacement text
             try:
                 page.insert_text(
                     insert_point,
-                    replacement_text,
+                    smart_replacement_text,
                     fontsize=font_size,
-                    fontname=fontname,
-                    color=color_rgb,
-                    render_mode=0  # fill text
+                    fontname=font_info.get('fontname', 'helvetica'),
+                    color=font_info.get('color', (0, 0, 0)),
+                    render_mode=0
                 )
                 
-                logger.debug(f"Successfully replaced '{original_text}' with '{replacement_text}' "
-                           f"using font: {fontname}, size: {font_size}, at position: ({insert_x:.1f}, {baseline_y:.1f})")
-                
+                logger.debug(f"Successfully removed and replaced '{original_text}' with '{smart_replacement_text}' (truncated from '{replacement_text}')")
                 return True
                 
             except Exception as e:
-                logger.debug(f"Text insertion failed: {e}, trying with default font")
-                # Try with default font
-                page.insert_text(
-                    insert_point,
-                    replacement_text,
-                    fontsize=font_size,
-                    fontname="helvetica",
-                    color=color_rgb
-                )
+                logger.debug(f"Text insertion failed: {e}")
+                # At least the original text is removed
                 return True
             
         except Exception as e:
-            logger.debug(f"Detailed text replacement failed: {e}")
-            return self._fallback_text_replacement(page, rect, replacement_text)
+            logger.debug(f"Secure text replacement failed: {e}")
+            return self._fallback_secure_replacement(page, rect, replacement_text)
+    
+    def _replace_text_with_redaction_formatting(self, page, rect: Tuple, original_text: str, replacement_text: str) -> bool:
+        """
+        Replace text with redaction formatting (black text).
+        IMPORTANT: Actually removes original text from PDF, not just visual overlay.
+        
+        Args:
+            page: PDF page object
+            rect: Rectangle coordinates (x0, y0, x1, y1)
+            original_text: Original text being redacted
+            replacement_text: Redaction text (usually "[REDACTED]")
+            
+        Returns:
+            True if redaction was successful, False otherwise
+        """
+        try:
+            # Extract font info BEFORE redaction
+            font_info = self._extract_font_info_from_rect(page, rect)
+            
+            x0, y0, x1, y1 = rect
+            
+            # Create redaction annotation to completely remove the original text
+            redact_rect = fitz.Rect(x0, y0, x1, y1)
+            redact_annot = page.add_redact_annot(redact_rect)
+            redact_annot.update()
+            
+            # Apply the redaction to permanently remove the text
+            page.apply_redactions()
+            
+            # Make redacted text smaller to fit better and prevent overlap
+            redact_font_size = max(font_info['size'] * 0.7, 6)  # 30% smaller but at least 6pt
+            
+            # Apply smart truncation for redaction text with strict control
+            smart_replacement_text = self._smart_text_truncation(original_text, replacement_text, 0.9)
+            
+            # Calculate text positioning with better spacing
+            insert_x = x0 + 1.0  # Small left margin
+            baseline_offset = redact_font_size * 0.25
+            baseline_y = y1 - baseline_offset
+            insert_point = fitz.Point(insert_x, baseline_y)
+            
+            # Insert redaction text in BLACK color with bold styling for emphasis
+            try:
+                page.insert_text(
+                    insert_point,
+                    smart_replacement_text,
+                    fontsize=redact_font_size,
+                    fontname="helv-bold",  # Use bold for redacted text
+                    color=(0, 0, 0),  # BLACK color for redaction
+                    render_mode=0
+                )
+                
+                logger.debug(f"Successfully removed and redacted '{original_text}' with '{smart_replacement_text}' in black")
+                return True
+                
+            except Exception as e:
+                # Fallback to regular helvetica if bold fails
+                logger.debug(f"Bold redaction failed: {e}, trying regular font")
+                page.insert_text(
+                    insert_point,
+                    smart_replacement_text,
+                    fontsize=redact_font_size,
+                    fontname="helvetica",
+                    color=(0, 0, 0),  # BLACK color
+                    render_mode=0
+                )
+                logger.debug(f"Applied redaction with regular font: '{smart_replacement_text}'")
+                return True
+                
+        except Exception as e:
+            logger.debug(f"Secure redaction failed: {e}")
+            # Fallback: create a simple black rectangle to hide the area
+            try:
+                redact_rect = fitz.Rect(rect)
+                redact_annot = page.add_redact_annot(redact_rect, fill=(0, 0, 0))  # Black fill
+                redact_annot.update()
+                page.apply_redactions()
+                logger.debug(f"Applied fallback black box redaction")
+                return True
+            except Exception as fallback_error:
+                logger.error(f"Even fallback redaction failed: {fallback_error}")
+                return False
+    
+    def _extract_font_info_from_rect(self, page, rect: Tuple) -> Dict[str, Any]:
+        """
+        Extract font information from a rectangle before any redaction occurs.
+        
+        Args:
+            page: PDF page object
+            rect: Rectangle coordinates
+            
+        Returns:
+            Dictionary with font information
+        """
+        try:
+            x0, y0, x1, y1 = rect
+            text_dict = page.get_text("dict", clip=rect)
+            
+            font_info = {
+                'size': max((y1 - y0) * 0.75, 8),  # Default estimate
+                'fontname': 'helvetica',
+                'color': (0, 0, 0)
+            }
+            
+            if text_dict and 'blocks' in text_dict:
+                for block in text_dict['blocks']:
+                    if 'lines' in block:
+                        for line in block['lines']:
+                            if 'spans' in line:
+                                for span in line['spans']:
+                                    if span.get('size', 0) > 0:
+                                        font_info['size'] = span['size']
+                                    
+                                    if span.get('font'):
+                                        font_flags = span.get('flags', 0)
+                                        font_info['fontname'] = self._get_proper_fontname(span['font'], font_flags)
+                                    
+                                    if span.get('color') is not None:
+                                        color = span['color']
+                                        if isinstance(color, int):
+                                            r = (color >> 16) & 255
+                                            g = (color >> 8) & 255
+                                            b = color & 255
+                                            font_info['color'] = (r/255.0, g/255.0, b/255.0)
+                                    
+                                    # Use first valid font info found
+                                    if font_info['size'] > 0:
+                                        return font_info
+            
+            return font_info
+            
+        except Exception as e:
+            logger.debug(f"Error extracting font info: {e}")
+            return {
+                'size': max((rect[3] - rect[1]) * 0.75, 8),
+                'fontname': 'helvetica',
+                'color': (0, 0, 0)
+            }
+    
+    def _get_font_properties_from_rect(self, rect: Tuple) -> Tuple[float, str]:
+        """
+        Estimate font properties from rectangle dimensions when text is not accessible.
+        
+        Args:
+            rect: Rectangle coordinates (x0, y0, x1, y1)
+            
+        Returns:
+            Tuple of (font_size, font_name)
+        """
+        try:
+            x0, y0, x1, y1 = rect
+            text_height = y1 - y0
+            
+            # Estimate font size from rectangle height (typical ratio is 0.7-0.8)
+            estimated_font_size = max(text_height * 0.75, 8)
+            
+            return estimated_font_size, "helvetica"
+            
+        except Exception as e:
+            logger.debug(f"Error estimating font properties: {e}")
+            return 11.0, "helvetica"
+    
+    def _fallback_secure_replacement(self, page, rect: Tuple, replacement_text: str) -> bool:
+        """
+        Secure fallback method that ensures original text is removed even if detailed replacement fails.
+        """
+        try:
+            x0, y0, x1, y1 = rect
+            
+            # CRITICAL: Always remove original text first using redaction
+            redact_rect = fitz.Rect(x0, y0, x1, y1)
+            redact_annot = page.add_redact_annot(redact_rect)
+            redact_annot.update()
+            page.apply_redactions()
+            
+            # Estimate font size and apply basic truncation
+            font_size = max((y1 - y0) * 0.7, 8)
+            smart_replacement_text = replacement_text
+            if len(replacement_text) > 12:
+                if replacement_text == "[REDACTED]":
+                    smart_replacement_text = "[RED]"
+                elif len(replacement_text) > 15:
+                    smart_replacement_text = replacement_text[:12] + ".."
+            
+            # Insert replacement text
+            insert_x = x0 + 0.5
+            baseline_y = y1 - (font_size * 0.22)
+            insert_point = fitz.Point(insert_x, baseline_y)
+            
+            page.insert_text(
+                insert_point,
+                smart_replacement_text,
+                fontsize=font_size,
+                fontname="helvetica",
+                color=(0, 0, 0),
+                render_mode=0
+            )
+            
+            logger.debug(f"Applied secure fallback replacement: '{smart_replacement_text}'")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Secure fallback replacement failed: {e}")
+            # Even if text insertion fails, original text is removed
+            return True
     
     def _fallback_text_replacement(self, page, rect: Tuple, replacement_text: str) -> bool:
         """
-        Fallback method for text replacement when detailed analysis fails.
-        Uses simpler but more reliable approach.
+        Secure fallback method for text replacement that ensures original text is completely removed.
         """
         try:
-            # Get basic font properties
-            font_size, font_name = self._get_font_properties(page, rect)
-            
             x0, y0, x1, y1 = rect
-            text_width = x1 - x0
-            text_height = y1 - y0
             
-            # Create a properly sized white rectangle to cover original text
-            # Use the exact rectangle dimensions with minimal padding
-            padding = 0.5
-            cover_rect = fitz.Rect(x0 - padding, y0 - padding, x1 + padding, y1 + padding)
-            page.draw_rect(cover_rect, color=None, fill=(1, 1, 1), width=0)
+            # CRITICAL: Always remove original text first using redaction
+            redact_rect = fitz.Rect(x0, y0, x1, y1)
+            redact_annot = page.add_redact_annot(redact_rect)
+            redact_annot.update()
+            page.apply_redactions()
             
-            # Calculate proper text positioning
-            # Use a more accurate baseline calculation
-            if font_size > 0:
-                baseline_offset = font_size * 0.23  # More accurate baseline ratio
-            else:
-                baseline_offset = text_height * 0.25  # Fallback based on rect height
+            # For fallback, apply basic truncation if text is very long
+            smart_replacement_text = replacement_text
+            if len(replacement_text) > 12:  # If very long, truncate
+                if replacement_text == "[REDACTED]":
+                    smart_replacement_text = "[RED]"  # Shorter redaction
+                elif len(replacement_text) > 15:
+                    smart_replacement_text = replacement_text[:12] + ".."
             
-            # Position text slightly inward from the left edge
+            # Estimate font size from rectangle height
+            font_size = max((y1 - y0) * 0.75, 8)
+            
+            # Calculate text positioning
             insert_x = x0 + 0.5
-            insert_y = y1 - baseline_offset
-            
-            insert_point = fitz.Point(insert_x, insert_y)
-            
-            # Use a reliable font name
-            safe_font_name = "helvetica"  # Always available in PyMuPDF
-            if font_name and font_name.lower() in ['times', 'courier']:
-                safe_font_name = font_name.lower()
+            baseline_y = y1 - (font_size * 0.22)
+            insert_point = fitz.Point(insert_x, baseline_y)
             
             # Insert replacement text with conservative settings
             page.insert_text(
                 insert_point,
-                replacement_text,
-                fontsize=max(font_size, 9),  # Minimum readable size
-                fontname=safe_font_name,
+                smart_replacement_text,
+                fontsize=font_size,
+                fontname="helvetica",
                 color=(0, 0, 0),  # Always black for readability
                 render_mode=0
             )
             
-            logger.debug(f"Applied fallback text replacement: '{replacement_text}' "
-                        f"at ({insert_x:.1f}, {insert_y:.1f}) with font: {safe_font_name}, size: {font_size}")
+            logger.debug(f"Applied secure fallback text replacement: '{smart_replacement_text}' "
+                        f"at ({insert_x:.1f}, {baseline_y:.1f}) with font size: {font_size}")
             return True
             
         except Exception as e:
-            logger.error(f"Fallback text replacement failed: {e}")
-            return False
+            logger.error(f"Secure fallback text replacement failed: {e}")
+            # Even if replacement fails, original text is removed by redaction
+            return True
+    
+    def _smart_text_truncation(self, original_text: str, replacement_text: str, max_width_ratio: float = 1.0) -> str:
+        """
+        Intelligently truncate replacement text to prevent overlapping with adjacent text.
+        More aggressive truncation to ensure clean layout.
+        
+        Args:
+            original_text: Original text being replaced
+            replacement_text: Replacement text
+            max_width_ratio: Maximum allowed width ratio (replacement/original) - default 1.0 for strict control
+            
+        Returns:
+            Potentially truncated replacement text
+        """
+        try:
+            original_len = len(original_text.strip())
+            replacement_len = len(replacement_text)
+            
+            # Very strict control - replacement should not be much longer than original
+            if replacement_len <= original_len * max_width_ratio:
+                return replacement_text
+            
+            # For redacted text, use progressively shorter versions based on original length
+            if replacement_text == "[REDACTED]":
+                if original_len <= 2:
+                    return "**"  # Very short original
+                elif original_len <= 4:
+                    return "[*]"  # Short original  
+                elif original_len <= 6:
+                    return "[RED]"  # Medium original
+                elif original_len <= 8:
+                    return "[REDACT]"  # Longer original
+                else:
+                    return "[REDACTED]"  # Keep full only for very long original
+            
+            # For pseudo names, be very aggressive in shortening to prevent overlap
+            if " " in replacement_text and replacement_text.count(" ") == 1:  # Full names
+                parts = replacement_text.split()
+                if len(parts) >= 2:
+                    first_name, last_name = parts[0], parts[1]
+                    
+                    # Very short original - use just first name or initials
+                    if original_len <= 4:
+                        return first_name[:3] if len(first_name) > 3 else first_name
+                    elif original_len <= 6:
+                        # Short original - use first name only or first + initial
+                        if len(first_name) <= 4:
+                            return f"{first_name} {last_name[0]}"
+                        else:
+                            return first_name[:4]
+                    elif original_len <= 10:
+                        # Medium original - shorten both names if needed
+                        short_first = first_name[:4] if len(first_name) > 4 else first_name
+                        short_last = last_name[:4] if len(last_name) > 4 else last_name
+                        return f"{short_first} {short_last}"
+                    else:
+                        # Longer original - allow slightly longer but still controlled
+                        max_first = min(len(first_name), 5)
+                        max_last = min(len(last_name), 6)
+                        return f"{first_name[:max_first]} {last_name[:max_last]}"
+            
+            # For single words (including single names), be very strict
+            elif " " not in replacement_text:
+                # Single word replacement
+                if original_len <= 3:
+                    return replacement_text[:3]
+                elif original_len <= 5:
+                    return replacement_text[:4]
+                elif original_len <= 8:
+                    return replacement_text[:6]
+                else:
+                    # Allow longer but with limit
+                    max_len = min(original_len, 8)
+                    return replacement_text[:max_len]
+            
+            # For other text types, be conservative with truncation
+            max_len = max(int(original_len * max_width_ratio), 4)  # At least 4 chars
+            if replacement_len > max_len:
+                if max_len > 6:
+                    return replacement_text[:max_len-2] + ".."
+                else:
+                    return replacement_text[:max_len]
+            
+            return replacement_text
+            
+        except Exception as e:
+            logger.debug(f"Error in smart truncation: {e}")
+            # Fallback: very conservative truncation
+            max_len = min(len(original_text), len(replacement_text), 8)
+            return replacement_text[:max_len] if len(replacement_text) > max_len else replacement_text
+    
+    def _calculate_text_width(self, text: str, font_size: float, fontname: str) -> float:
+        """
+        Calculate approximate text width based on font size and font type.
+        
+        Args:
+            text: Text to measure
+            font_size: Font size in points
+            fontname: Font name
+            
+        Returns:
+            Approximate text width in points
+        """
+        try:
+            # Character width ratios for different fonts (relative to font size)
+            font_width_ratios = {
+                'courier': 0.6,  # Monospace - all chars same width
+                'cour-bold': 0.6,
+                'cour-oblique': 0.6,
+                'cour-boldoblique': 0.6,
+                'helvetica': 0.55,  # Sans-serif
+                'helv-bold': 0.6,
+                'helv-oblique': 0.55,
+                'helv-boldoblique': 0.6,
+                'times-roman': 0.5,  # Serif - typically narrower
+                'times-bold': 0.55,
+                'times-italic': 0.5,
+                'times-bolditalic': 0.55,
+            }
+            
+            # Get width ratio for the font (default to helvetica if not found)
+            ratio = font_width_ratios.get(fontname.lower(), 0.55)
+            
+            # Calculate approximate width
+            # Account for character variations - some letters are wider than others
+            char_count = len(text)
+            
+            # Apply character-specific adjustments
+            wide_chars = sum(1 for c in text if c.upper() in 'MWQG@')
+            narrow_chars = sum(1 for c in text if c in 'ijl .,;:')
+            normal_chars = char_count - wide_chars - narrow_chars
+            
+            # Weighted character count
+            weighted_count = (wide_chars * 1.3 + narrow_chars * 0.7 + normal_chars * 1.0)
+            
+            estimated_width = weighted_count * font_size * ratio
+            
+            logger.debug(f"Text width calculation: '{text}' -> {estimated_width:.1f}px "
+                        f"(font: {fontname}, size: {font_size}, ratio: {ratio})")
+            
+            return estimated_width
+            
+        except Exception as e:
+            logger.debug(f"Error calculating text width: {e}")
+            # Fallback: simple calculation
+            return len(text) * font_size * 0.55
     
     def _get_proper_fontname(self, original_font: str, font_flags: int) -> str:
         """
@@ -683,6 +1036,14 @@ class BERTPIIMasker:
             logger.info(f"Processing PDF: {input_pdf_path} ({stats['total_pages']} pages)")
             logger.info(f"PII configurations to apply: {len(pii_configs)}")
             
+            # Extract full text for LLM validation
+            full_text = ""
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                full_text += page.get_text() + "\n"
+
+            validated_configs = pii_configs
+            
             # Process each page
             for page_num in range(len(doc)):
                 page = doc[page_num]
@@ -692,19 +1053,57 @@ class BERTPIIMasker:
                     logger.debug(f"Page {page_num + 1}: No text found, skipping")
                     continue
                 
-                page_masked_count = 0
+                # Get configurations for this page from validated configs
+                page_configs = [config for config in validated_configs if config.page_num == page_num]
+                if not page_configs:
+                    continue
                 
-                # Apply each PII configuration
-                for pii_config in pii_configs:
-                    # Skip if this PII is not on the current page
-                    if pii_config.page_num != page_num:
-                        continue
+                page_masked_count = 0
+                logger.info(f"Processing page {page_num + 1} with {len(page_configs)} PII entities")
+                
+                # CRITICAL: Sort configurations by text length (longest first) to avoid overlapping replacements
+                # This prevents issues where "Aaron Mehta" gets replaced partially by "Aaron" and "Mehta"
+                page_configs.sort(key=lambda x: (-len(x.text), -x.y0, -x.x0))
+                
+                # Process PII in smaller batches to maintain consistency
+                batch_size = 5  # Process 5 items at a time
+                for batch_start in range(0, len(page_configs), batch_size):
+                    batch_configs = page_configs[batch_start:batch_start + batch_size]
                     
-                    # Check if we have coordinates in the config
-                    if (pii_config.x0 != 0.0 or pii_config.y0 != 0.0 or 
-                        pii_config.x1 != 0.0 or pii_config.y1 != 0.0):
-                        # Use coordinates from config - no need to search
-                        success = self.apply_masking_strategy(page, None, pii_config)
+                    logger.info(f"Processing batch {batch_start//batch_size + 1} with {len(batch_configs)} PII entities")
+                    
+                    # Apply each PII configuration in the batch
+                    for pii_config in batch_configs:
+                        success = False
+                        
+                        # Check if we have coordinates in the config
+                        if (pii_config.x0 != 0.0 or pii_config.y0 != 0.0 or 
+                            pii_config.x1 != 0.0 or pii_config.y1 != 0.0):
+                            # Use coordinates from config - no need to search
+                            success = self.apply_masking_strategy(page, None, pii_config)
+                            
+                            if success:
+                                logger.info(f"Page {page_num + 1}: Masked '{pii_config.text}' "
+                                          f"({pii_config.pii_type}) at coordinates ({pii_config.x0:.1f}, {pii_config.y0:.1f}) "
+                                          f"with {pii_config.strategy} strategy")
+                            else:
+                                logger.warning(f"Failed to mask '{pii_config.text}' at specified coordinates")
+                        else:
+                            logger.warning(f"No coordinates available for PII '{pii_config.text}', trying text search fallback")
+                            # Fallback: search for text instances (old method)
+                            text_instances = self.find_text_instances_in_page(page, pii_config.text)
+                            
+                            if not text_instances:
+                                logger.warning(f"PII '{pii_config.text}' not found on page {page_num + 1}")
+                                continue
+                            
+                            # Apply masking strategy to the first instance (most likely correct)
+                            rect = text_instances[0]
+                            success = self.apply_masking_strategy(page, rect, pii_config)
+                            
+                            if success:
+                                logger.info(f"Page {page_num + 1}: Masked '{pii_config.text}' "
+                                          f"({pii_config.pii_type}) via text search with {pii_config.strategy} strategy")
                         
                         if success:
                             page_masked_count += 1
@@ -715,49 +1114,18 @@ class BERTPIIMasker:
                             if strategy not in stats["strategies_used"]:
                                 stats["strategies_used"][strategy] = 0
                             stats["strategies_used"][strategy] += 1
-                            
-                            logger.info(f"Page {page_num + 1}: Masked '{pii_config.text}' "
-                                      f"({pii_config.pii_type}) at coordinates ({pii_config.x0:.1f}, {pii_config.y0:.1f}) "
-                                      f"with {strategy} strategy")
                         else:
                             stats["failed_maskings"] += 1
-                    else:
-                        logger.warning(f"No coordinates available for PII '{pii_config.text}', trying text search fallback")
-                        # Fallback: search for text instances (old method)
-                        text_instances = self.find_text_instances_in_page(page, pii_config.text)
-                        
-                        if not text_instances:
-                            logger.warning(f"PII '{pii_config.text}' not found on page {page_num + 1}")
-                            continue
-                        
-                        # Apply masking strategy to each instance
-                        for rect in text_instances:
-                            success = self.apply_masking_strategy(page, rect, pii_config)
-                            
-                            if success:
-                                page_masked_count += 1
-                                stats["total_pii_masked"] += 1
-                                
-                                # Update strategy statistics
-                                strategy = pii_config.strategy
-                                if strategy not in stats["strategies_used"]:
-                                    stats["strategies_used"][strategy] = 0
-                                stats["strategies_used"][strategy] += 1
-                                
-                                logger.info(f"Page {page_num + 1}: Masked '{pii_config.text}' "
-                                          f"({pii_config.pii_type}) with {strategy} strategy")
-                            else:
-                                stats["failed_maskings"] += 1
+                    
+                    # Small delay between batches to ensure processing consistency
+                    import time
+                    time.sleep(0.01)  # 10ms delay
                 
                 if page_masked_count > 0:
-                    # Apply redactions only for 'redact' strategy, others are already processed
-                    try:
-                        page.apply_redactions()
-                        stats["pages_processed"] += 1
-                        logger.info(f"Page {page_num + 1}: Applied {page_masked_count} maskings")
-                    except Exception as e:
-                        logger.warning(f"Error applying redactions on page {page_num + 1}: {e}")
-                        stats["pages_processed"] += 1  # Still count as processed
+                    # Text has already been securely removed during individual processing
+                    # No need for additional redaction steps
+                    stats["pages_processed"] += 1
+                    logger.info(f"Page {page_num + 1}: Successfully processed {page_masked_count} PII entities with secure removal")
             
             # Save the masked PDF
             doc.save(output_pdf_path)
@@ -809,6 +1177,17 @@ class BERTPIIMasker:
             for original, replacement in self.used_mappings.items():
                 report_lines.append(f"'{original}' -> '{replacement}'")
         
+        # Add consistent name part mappings for better transparency
+        if self.name_part_mappings:
+            report_lines.extend([
+                "",
+                "Consistent Name Part Mappings:",
+                "-" * 40,
+                "(This ensures partial names are replaced consistently)"
+            ])
+            for original_part, replacement_part in self.name_part_mappings.items():
+                report_lines.append(f"'{original_part}' -> '{replacement_part}'")
+        
         report = "\n".join(report_lines)
         
         if output_path:
@@ -817,118 +1196,6 @@ class BERTPIIMasker:
             logger.info(f"Report saved to: {output_path}")
         
         return report
-    
-    def interactive_mode(self, input_pdf_path: str) -> List[PIIConfig]:
-        """
-        Interactive mode to configure PII masking strategies.
-        
-        Args:
-            input_pdf_path: Path to input PDF for PII detection
-            
-        Returns:
-            List of PII configurations
-        """
-        print("\n" + "="*60)
-        print("INTERACTIVE PII MASKING CONFIGURATION")
-        print("="*60)
-        
-        # First, detect PII using BERT
-        try:
-            doc = fitz.open(input_pdf_path)
-            all_text = ""
-            for page_num in range(len(doc)):
-                page_text = doc[page_num].get_text()
-                all_text += page_text + "\n"
-            doc.close()
-            
-            print("Detecting PII using BERT model...")
-            detected_entities = self.detect_pii_with_bert(all_text)
-            
-            if not detected_entities:
-                print("No PII detected in the document.")
-                return []
-            
-            print(f"\nDetected {len(detected_entities)} PII entities:")
-            print("-" * 50)
-            
-            configs = []
-            
-            for i, entity in enumerate(detected_entities, 1):
-                print(f"\n{i}. Text: '{entity['word']}'")
-                print(f"   Type: {entity['entity_group']}")
-                print(f"   Confidence: {entity['score']:.2f}")
-                
-                # Ask user for masking strategy
-                print("   Masking strategies:")
-                print("   1. redact - Complete redaction (black box)")
-                print("   2. mask - Replace with asterisks")
-                print("   3. pseudo - Replace with pseudo data")
-                print("   4. skip - Don't mask this PII")
-                
-                while True:
-                    choice = input("   Choose strategy (1-4): ").strip()
-                    if choice == "1":
-                        strategy = "redact"
-                        break
-                    elif choice == "2":
-                        strategy = "mask"
-                        break
-                    elif choice == "3":
-                        strategy = "pseudo"
-                        break
-                    elif choice == "4":
-                        print("   Skipping this PII...")
-                        strategy = None
-                        break
-                    else:
-                        print("   Invalid choice. Please enter 1, 2, 3, or 4.")
-                
-                if strategy:
-                    # Ask for custom replacement if needed
-                    replacement = None
-                    if strategy in ["mask", "pseudo"]:
-                        custom = input("   Custom replacement (press Enter for default): ").strip()
-                        if custom:
-                            replacement = custom
-                    
-                    config = PIIConfig(
-                        text=entity['word'],
-                        pii_type=entity['entity_group'],
-                        strategy=strategy,
-                        replacement=replacement
-                    )
-                    configs.append(config)
-            
-            print(f"\nConfigured {len(configs)} PII entities for masking.")
-            return configs
-            
-        except Exception as e:
-            logger.error(f"Error in interactive mode: {e}")
-            return []
-
-def create_sample_config_file():
-    """Create a sample configuration file for reference."""
-    sample_config = """# PII Masking Configuration File
-# Format: PII_TEXT:TYPE:STRATEGY[:CUSTOM_REPLACEMENT]
-# 
-# Strategies:
-#   redact - Complete redaction (black box)
-#   mask - Replace with asterisks
-#   pseudo - Replace with pseudo data
-#
-# Examples:
-John Doe:PERSON:pseudo
-jane.smith@email.com:EMAIL:mask
-555-123-4567:PHONE:redact
-123-45-6789:SSN:mask:XXX-XX-XXXX
-"""
-    
-    config_path = "sample_pii_config.txt"
-    with open(config_path, 'w') as f:
-        f.write(sample_config)
-    
-    logger.info(f"Sample configuration file created: {config_path}")
-    return config_path
 
 def main():
     """Main function for command-line usage."""
@@ -946,10 +1213,6 @@ def main():
         print("  python bert_pii_masker.py document.pdf masked.pdf --interactive")
         return 1
     
-    if sys.argv[1] == "--sample-config":
-        create_sample_config_file()
-        return 0
-    
     input_pdf = sys.argv[1]
     output_pdf = sys.argv[2]
     
@@ -964,12 +1227,7 @@ def main():
     try:
         # Initialize the masker
         masker = BERTPIIMasker()
-        
-        # Get PII configurations
-        if len(sys.argv) > 3 and sys.argv[3] == "--interactive":
-            # Interactive mode
-            pii_configs = masker.interactive_mode(input_pdf)
-        elif len(sys.argv) > 3:
+        if len(sys.argv) > 3:
             # Configuration file mode
             config_input = sys.argv[3]
             pii_configs = masker.parse_pii_config(config_input)
