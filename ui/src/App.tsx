@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AppLayout } from "./components/layout/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import DocumentIngestion from "./pages/DocumentIngestion";
+import SimpleDocumentIngestion from "./pages/SimpleDocumentIngestion";
 import Sandbox from "./pages/Sandbox";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
@@ -79,6 +80,10 @@ const App = () => {
                 path="/auth/callback"
                 element={<CallbackPage onLogin={handleLogin} />}
               />
+              <Route
+                path="/simple-demo"
+                element={<SimpleDocumentIngestion />}
+              />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </BrowserRouter>
@@ -97,7 +102,11 @@ const App = () => {
             <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route element={<AppLayout user={user} onLogout={handleLogout} />}>
               <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/ingestion" element={<DocumentIngestion />} />
+              <Route path="/ingestion" element={<SimpleDocumentIngestion />} />
+              <Route
+                path="/simple-ingestion"
+                element={<SimpleDocumentIngestion />}
+              />
               <Route path="/sandbox" element={<Sandbox />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/settings" element={<Settings />} />

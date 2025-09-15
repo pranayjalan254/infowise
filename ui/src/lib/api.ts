@@ -709,6 +709,98 @@ export const syntheticDataApi = {
     }>("/synthetic/jobs"),
 };
 
+// Simple Processing API for Hackathon Prototype (no JWT required)
+export const simpleProcessingApi = {
+  uploadDocument: (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    return fetch(`${API_BASE_URL}/simple/upload`, {
+      method: "POST",
+      body: formData,
+    }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error?.message || "Upload failed");
+      }
+      return data;
+    });
+  },
+
+  generateConfig: (documentId: string) =>
+    fetch(`${API_BASE_URL}/simple/generate-config/${documentId}`, {
+      method: "POST",
+    }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error?.message || "Config generation failed");
+      }
+      return data;
+    }),
+
+  getConfig: (documentId: string) =>
+    fetch(`${API_BASE_URL}/simple/config/${documentId}`).then(
+      async (response) => {
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error?.message || "Failed to get config");
+        }
+        return data;
+      }
+    ),
+
+  updateConfig: (documentId: string, configData: any[]) =>
+    fetch(`${API_BASE_URL}/simple/config/${documentId}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ config_data: configData }),
+    }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error?.message || "Failed to update config");
+      }
+      return data;
+    }),
+
+  applyMasking: (documentId: string) =>
+    fetch(`${API_BASE_URL}/simple/apply-masking/${documentId}`, {
+      method: "POST",
+    }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error?.message || "Masking failed");
+      }
+      return data;
+    }),
+
+  downloadMaskedDocument: (documentId: string) =>
+    fetch(`${API_BASE_URL}/simple/download/${documentId}`).then((response) => {
+      if (!response.ok) {
+        throw new Error("Download failed");
+      }
+      return response.blob();
+    }),
+
+  getDocumentStatus: (documentId: string) =>
+    fetch(`${API_BASE_URL}/simple/status/${documentId}`).then(
+      async (response) => {
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error?.message || "Failed to get status");
+        }
+        return data;
+      }
+    ),
+
+  getPreviewUrl: (documentId: string) =>
+    `${API_BASE_URL}/simple/preview/${documentId}`,
+
+  getMaskedPreviewUrl: (documentId: string) =>
+    `${API_BASE_URL}/simple/preview-masked/${documentId}`,
+};
+
 // Query client for React Query
 export const queryClient = new QueryClient({
   defaultOptions: {

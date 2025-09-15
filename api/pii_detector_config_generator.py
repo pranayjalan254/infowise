@@ -15,7 +15,6 @@ Usage:
 
 import sys
 import os
-import re
 import logging
 import json
 from typing import List, Dict, Any, Tuple, Optional
@@ -308,6 +307,7 @@ class PIIDetectorConfigGenerator:
 - SSN: Social Security Numbers (XXX-XX-XXXX format or variations)
 - PASSPORT: Passport numbers (any format with letters/numbers)
 - DRIVER_LICENSE: Driver's license numbers (state-specific formats)
+- ORGANISATIONS: Company names, institutions, agencies
 
 **CONTACT INFORMATION:**
 - EMAIL: All email addresses (any @domain format)
@@ -902,7 +902,7 @@ def main():
         
         # Generate detection report
         report_path = output_config.replace('.txt', '_detection_report.txt')
-        report = detector.generate_detection_report(stats, report_path)
+        detector.generate_detection_report(stats, report_path)
         
         # Display summary
         print("\n" + "="*50)

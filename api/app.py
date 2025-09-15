@@ -80,6 +80,10 @@ def register_blueprints(app: Flask) -> None:
     from services.synthetic_data import synthetic_data_bp
     app.register_blueprint(synthetic_data_bp, url_prefix='/api/v1/synthetic')
     
+    # Simple processing for hackathon prototype (no JWT required)
+    from services.simple_processing import simple_processing_bp
+    app.register_blueprint(simple_processing_bp, url_prefix='/api/v1/simple')
+    
     # Compliance checking (TODO)
     # from services.compliance import compliance_bp
     # app.register_blueprint(compliance_bp, url_prefix='/api/v1')

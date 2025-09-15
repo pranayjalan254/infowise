@@ -21,7 +21,6 @@ import sys
 import os
 import random
 import logging
-import json
 import re
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
@@ -39,6 +38,12 @@ try:
     import fitz  # PyMuPDF
 except ImportError:
     print("PyMuPDF not found. Please install: pip install PyMuPDF")
+    sys.exit(1)
+
+try:
+    from docx import Document
+except ImportError:
+    print("python-docx not found. Please install: pip install python-docx")
     sys.exit(1)
 
 @dataclass
@@ -72,7 +77,6 @@ class BERTPIIMasker:
             from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
             
             model_name = "dslim/bert-base-NER"
-            logger.info(f"Loading BERT model: {model_name}")
             
             tokenizer = AutoTokenizer.from_pretrained(model_name)
             model = AutoModelForTokenClassification.from_pretrained(model_name)
@@ -81,7 +85,6 @@ class BERTPIIMasker:
                                         model=model, 
                                         tokenizer=tokenizer,
                                         aggregation_strategy="simple")
-            logger.info("✓ BERT model loaded successfully")
             
         except ImportError:
             logger.error("Transformers not installed. Please run: pip install transformers torch")
@@ -152,7 +155,6 @@ class BERTPIIMasker:
                 # Check if this single name is already mapped as part of a full name
                 if single_name in self.name_part_mappings:
                     replacement = self.name_part_mappings[single_name]
-                    logger.debug(f"Using consistent partial mapping: '{single_name}' -> '{replacement}'")
                 else:
                     # Create new single name mapping
                     available_names = [name for name in self.pseudo_data.get("first_names", ["Alex"]) 
@@ -189,8 +191,6 @@ class BERTPIIMasker:
                     self.name_part_mappings[last_name] = mapped_last
                 
                 replacement = f"{mapped_first} {mapped_last}"
-                logger.debug(f"Creating consistent full name mapping: '{original_text}' -> '{replacement}'")
-                logger.debug(f"Part mappings: '{first_name}' -> '{mapped_first}', '{last_name}' -> '{mapped_last}'")
                 
             else:
                 # Handle names with more than 2 parts (rare case)
@@ -392,11 +392,9 @@ class BERTPIIMasker:
             if pii_config.x0 != 0.0 or pii_config.y0 != 0.0 or pii_config.x1 != 0.0 or pii_config.y1 != 0.0:
                 # Use coordinates from configuration
                 target_rect = (pii_config.x0, pii_config.y0, pii_config.x1, pii_config.y1)
-                logger.debug(f"Using config coordinates: {target_rect}")
             elif rect:
                 # Use provided rectangle
                 target_rect = rect
-                logger.debug(f"Using provided rectangle: {target_rect}")
             else:
                 logger.error("No coordinates available for masking")
                 return False
@@ -505,12 +503,10 @@ class BERTPIIMasker:
                 return True
                 
             except Exception as e:
-                logger.debug(f"Text insertion failed: {e}")
                 # At least the original text is removed
                 return True
             
         except Exception as e:
-            logger.debug(f"Secure text replacement failed: {e}")
             return self._fallback_secure_replacement(page, rect, replacement_text)
     
     def _replace_text_with_redaction_formatting(self, page, rect: Tuple, original_text: str, replacement_text: str) -> bool:
@@ -569,7 +565,6 @@ class BERTPIIMasker:
                 
             except Exception as e:
                 # Fallback to regular helvetica if bold fails
-                logger.debug(f"Bold redaction failed: {e}, trying regular font")
                 page.insert_text(
                     insert_point,
                     smart_replacement_text,
@@ -578,18 +573,15 @@ class BERTPIIMasker:
                     color=(0, 0, 0),  # BLACK color
                     render_mode=0
                 )
-                logger.debug(f"Applied redaction with regular font: '{smart_replacement_text}'")
                 return True
                 
         except Exception as e:
-            logger.debug(f"Secure redaction failed: {e}")
             # Fallback: create a simple black rectangle to hide the area
             try:
                 redact_rect = fitz.Rect(rect)
                 redact_annot = page.add_redact_annot(redact_rect, fill=(0, 0, 0))  # Black fill
                 redact_annot.update()
                 page.apply_redactions()
-                logger.debug(f"Applied fallback black box redaction")
                 return True
             except Exception as fallback_error:
                 logger.error(f"Even fallback redaction failed: {fallback_error}")
@@ -644,7 +636,6 @@ class BERTPIIMasker:
             return font_info
             
         except Exception as e:
-            logger.debug(f"Error extracting font info: {e}")
             return {
                 'size': max((rect[3] - rect[1]) * 0.75, 8),
                 'fontname': 'helvetica',
@@ -671,7 +662,6 @@ class BERTPIIMasker:
             return estimated_font_size, "helvetica"
             
         except Exception as e:
-            logger.debug(f"Error estimating font properties: {e}")
             return 11.0, "helvetica"
     
     def _fallback_secure_replacement(self, page, rect: Tuple, replacement_text: str) -> bool:
@@ -757,8 +747,6 @@ class BERTPIIMasker:
                 render_mode=0
             )
             
-            logger.debug(f"Applied secure fallback text replacement: '{smart_replacement_text}' "
-                        f"at ({insert_x:.1f}, {baseline_y:.1f}) with font size: {font_size}")
             return True
             
         except Exception as e:
@@ -851,7 +839,6 @@ class BERTPIIMasker:
             return replacement_text
             
         except Exception as e:
-            logger.debug(f"Error in smart truncation: {e}")
             # Fallback: very conservative truncation
             max_len = min(len(original_text), len(replacement_text), 8)
             return replacement_text[:max_len] if len(replacement_text) > max_len else replacement_text
@@ -902,13 +889,9 @@ class BERTPIIMasker:
             
             estimated_width = weighted_count * font_size * ratio
             
-            logger.debug(f"Text width calculation: '{text}' -> {estimated_width:.1f}px "
-                        f"(font: {fontname}, size: {font_size}, ratio: {ratio})")
-            
             return estimated_width
             
         except Exception as e:
-            logger.debug(f"Error calculating text width: {e}")
             # Fallback: simple calculation
             return len(text) * font_size * 0.55
     
@@ -1004,7 +987,6 @@ class BERTPIIMasker:
             return font_size, font_name
             
         except Exception as e:
-            logger.debug(f"Could not extract font properties: {e}")
             return 11.0, "helvetica"  # fallback defaults
     
     def mask_pdf_with_config(self, input_pdf_path: str, output_pdf_path: str, 
@@ -1034,7 +1016,6 @@ class BERTPIIMasker:
             stats["total_pages"] = len(doc)
             
             logger.info(f"Processing PDF: {input_pdf_path} ({stats['total_pages']} pages)")
-            logger.info(f"PII configurations to apply: {len(pii_configs)}")
             
             # Extract full text for LLM validation
             full_text = ""
@@ -1059,7 +1040,6 @@ class BERTPIIMasker:
                     continue
                 
                 page_masked_count = 0
-                logger.info(f"Processing page {page_num + 1} with {len(page_configs)} PII entities")
                 
                 # CRITICAL: Sort configurations by text length (longest first) to avoid overlapping replacements
                 # This prevents issues where "Aaron Mehta" gets replaced partially by "Aaron" and "Mehta"
@@ -1069,8 +1049,6 @@ class BERTPIIMasker:
                 batch_size = 5  # Process 5 items at a time
                 for batch_start in range(0, len(page_configs), batch_size):
                     batch_configs = page_configs[batch_start:batch_start + batch_size]
-                    
-                    logger.info(f"Processing batch {batch_start//batch_size + 1} with {len(batch_configs)} PII entities")
                     
                     # Apply each PII configuration in the batch
                     for pii_config in batch_configs:
@@ -1082,11 +1060,7 @@ class BERTPIIMasker:
                             # Use coordinates from config - no need to search
                             success = self.apply_masking_strategy(page, None, pii_config)
                             
-                            if success:
-                                logger.info(f"Page {page_num + 1}: Masked '{pii_config.text}' "
-                                          f"({pii_config.pii_type}) at coordinates ({pii_config.x0:.1f}, {pii_config.y0:.1f}) "
-                                          f"with {pii_config.strategy} strategy")
-                            else:
+                            if not success:
                                 logger.warning(f"Failed to mask '{pii_config.text}' at specified coordinates")
                         else:
                             logger.warning(f"No coordinates available for PII '{pii_config.text}', trying text search fallback")
@@ -1100,10 +1074,6 @@ class BERTPIIMasker:
                             # Apply masking strategy to the first instance (most likely correct)
                             rect = text_instances[0]
                             success = self.apply_masking_strategy(page, rect, pii_config)
-                            
-                            if success:
-                                logger.info(f"Page {page_num + 1}: Masked '{pii_config.text}' "
-                                          f"({pii_config.pii_type}) via text search with {pii_config.strategy} strategy")
                         
                         if success:
                             page_masked_count += 1
@@ -1125,14 +1095,12 @@ class BERTPIIMasker:
                     # Text has already been securely removed during individual processing
                     # No need for additional redaction steps
                     stats["pages_processed"] += 1
-                    logger.info(f"Page {page_num + 1}: Successfully processed {page_masked_count} PII entities with secure removal")
             
             # Save the masked PDF
             doc.save(output_pdf_path)
             doc.close()
             
             logger.info(f"✓ Masked PDF saved to: {output_pdf_path}")
-            logger.info(f"✓ Statistics: {stats}")
             
             return stats
             
@@ -1146,14 +1114,20 @@ class BERTPIIMasker:
         report_lines = [
             "BERT PII Masking Report",
             "=" * 50,
-            f"Total pages processed: {stats['pages_processed']}/{stats['total_pages']}",
+        ]
+        
+        # Handle different stats formats (direct vs text-based methods)
+        if 'pages_processed' in stats and 'total_pages' in stats:
+            report_lines.append(f"Total pages processed: {stats['pages_processed']}/{stats['total_pages']}")
+        
+        report_lines.extend([
             f"Total PII instances masked: {stats['total_pii_masked']}",
-            f"Failed maskings: {stats['failed_maskings']}",
+            f"Failed maskings: {stats.get('failed_maskings', 0)}",
             f"PII configurations applied: {len(pii_configs)}",
             "",
             "Masking Strategies Used:",
             "-" * 30
-        ]
+        ])
         
         for strategy, count in stats["strategies_used"].items():
             report_lines.append(f"{strategy}: {count} instances")
@@ -1197,6 +1171,270 @@ class BERTPIIMasker:
         
         return report
 
+    def pdf_to_text(self, pdf_path: str) -> str:
+        """Extract text from PDF while preserving structure."""
+        try:
+            doc = fitz.open(pdf_path)
+            full_text = ""
+            
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                page_text = page.get_text()
+                full_text += page_text + "\n\n"  # Add page breaks
+                
+            doc.close()
+            return full_text
+        except Exception as e:
+            logger.error(f"Error extracting text from PDF: {e}")
+            raise
+
+    def pdf_to_docx(self, pdf_path: str, docx_path: str):
+        """Convert PDF to Word document."""
+        try:
+            text = self.pdf_to_text(pdf_path)
+            doc = Document()
+            
+            # Split text into paragraphs
+            paragraphs = text.split('\n')
+            
+            for paragraph in paragraphs:
+                if paragraph.strip():  # Skip empty lines
+                    doc.add_paragraph(paragraph)
+                else:
+                    doc.add_paragraph("")  # Preserve spacing
+            
+            doc.save(docx_path)
+            logger.info(f"PDF converted to Word document: {docx_path}")
+        except Exception as e:
+            logger.error(f"Error converting PDF to DOCX: {e}")
+            raise
+
+    def mask_text(self, text: str, pii_configs: List[PIIConfig]) -> Tuple[str, Dict[str, Any]]:
+        """
+        Apply PII masking to plain text.
+        
+        Args:
+            text: The text content to mask
+            pii_configs: List of PII configurations
+            
+        Returns:
+            Tuple of (masked_text, stats)
+        """
+        stats = {
+            "total_pii_masked": 0,
+            "strategies_used": {},
+            "failed_maskings": 0
+        }
+        
+        masked_text = text
+        
+        # Sort PII configs by text length (longest first) to avoid overlapping replacements
+        sorted_configs = sorted(pii_configs, key=lambda x: -len(x.text))
+        
+        for config in sorted_configs:
+            original_text = config.text
+            
+            if original_text not in masked_text:
+                logger.warning(f"PII text '{original_text}' not found in document")
+                stats["failed_maskings"] += 1
+                continue
+            
+            # Generate replacement based on strategy
+            if config.strategy == "redact":
+                replacement = "[REDACTED]"
+            elif config.strategy == "mask":
+                replacement = "*" * len(original_text)
+            elif config.strategy == "pseudo":
+                if config.replacement:
+                    replacement = config.replacement
+                else:
+                    replacement = self._get_pseudo_replacement(config.pii_type, original_text)
+                    # Store the mapping for consistency
+                    self.used_mappings[original_text] = replacement
+            else:
+                logger.warning(f"Unknown strategy: {config.strategy}")
+                replacement = "[UNKNOWN_STRATEGY]"
+            
+            # Replace all occurrences
+            count = masked_text.count(original_text)
+            masked_text = masked_text.replace(original_text, replacement)
+            
+            if count > 0:
+                stats["total_pii_masked"] += count
+                stats["strategies_used"][config.strategy] = stats["strategies_used"].get(config.strategy, 0) + count
+                logger.info(f"Masked {count} occurrences of '{original_text}' with '{replacement}' ({config.strategy} strategy)")
+        
+        return masked_text, stats
+
+    def mask_docx(self, input_docx_path: str, output_docx_path: str, pii_configs: List[PIIConfig]) -> Dict[str, Any]:
+        """
+        Apply PII masking to a Word document.
+        
+        Args:
+            input_docx_path: Path to input Word document
+            output_docx_path: Path to output masked Word document
+            pii_configs: List of PII configurations
+            
+        Returns:
+            Dictionary with processing statistics
+        """
+        try:
+            doc = Document(input_docx_path)
+            
+            # Extract all text from the document
+            full_text = ""
+            for paragraph in doc.paragraphs:
+                full_text += paragraph.text + "\n"
+            
+            # Apply masking to the text
+            masked_text, stats = self.mask_text(full_text, pii_configs)
+            
+            # Replace paragraphs with masked content
+            masked_lines = masked_text.split('\n')
+            
+            # Clear existing paragraphs
+            for paragraph in doc.paragraphs:
+                paragraph.clear()
+            
+            # Add masked paragraphs
+            for i, line in enumerate(masked_lines):
+                if i < len(doc.paragraphs):
+                    doc.paragraphs[i].text = line
+                else:
+                    doc.add_paragraph(line)
+            
+            # Save the masked document
+            doc.save(output_docx_path)
+            logger.info(f"Masked Word document saved: {output_docx_path}")
+            
+            return stats
+        
+        except Exception as e:
+            logger.error(f"Error masking DOCX: {e}")
+            raise
+
+    def docx_to_pdf(self, docx_path: str, pdf_path: str):
+        """Convert Word document to PDF using reportlab."""
+        try:
+            doc = Document(docx_path)
+            
+            # Create PDF
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.pagesizes import letter
+            from reportlab.lib.units import inch
+            
+            # Create the PDF document
+            pdf_doc = SimpleDocTemplate(pdf_path, pagesize=letter)
+            styles = getSampleStyleSheet()
+            story = []
+            
+            # Add each paragraph from the Word document
+            for paragraph in doc.paragraphs:
+                if paragraph.text.strip():
+                    p = Paragraph(paragraph.text, styles['Normal'])
+                    story.append(p)
+                    story.append(Spacer(1, 0.1*inch))
+            
+            # Build the PDF
+            pdf_doc.build(story)
+            logger.info(f"Word document converted to PDF: {pdf_path}")
+            
+        except Exception as e:
+            logger.error(f"Error converting DOCX to PDF: {e}")
+            raise
+
+    def text_to_pdf(self, text: str, pdf_path: str):
+        """Convert plain text to PDF using reportlab."""
+        try:
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+            from reportlab.lib.styles import getSampleStyleSheet
+            from reportlab.lib.pagesizes import letter
+            from reportlab.lib.units import inch
+            
+            # Create the PDF document
+            doc = SimpleDocTemplate(pdf_path, pagesize=letter)
+            styles = getSampleStyleSheet()
+            story = []
+            
+            # Split text into paragraphs
+            paragraphs = text.split('\n')
+            
+            for paragraph in paragraphs:
+                if paragraph.strip():
+                    p = Paragraph(paragraph, styles['Normal'])
+                    story.append(p)
+                    story.append(Spacer(1, 0.1*inch))
+            
+            # Build the PDF
+            doc.build(story)
+            logger.info(f"Text converted to PDF: {pdf_path}")
+            
+        except Exception as e:
+            logger.error(f"Error converting text to PDF: {e}")
+            raise
+
+    def process_pdf_via_text_conversion(self, input_pdf_path: str, output_pdf_path: str, 
+                                      pii_configs: List[PIIConfig], use_docx: bool = True) -> Dict[str, Any]:
+        """
+        Process PDF by converting to text/docx, masking, then converting back to PDF.
+        
+        Args:
+            input_pdf_path: Path to input PDF file
+            output_pdf_path: Path to output masked PDF file
+            pii_configs: List of PII configurations
+            use_docx: If True, convert via Word document; if False, use plain text
+            
+        Returns:
+            Dictionary with processing statistics
+        """
+        import tempfile
+        import os
+        
+        try:
+            # Create temporary files
+            temp_dir = tempfile.mkdtemp()
+            
+            if use_docx:
+                temp_docx_input = os.path.join(temp_dir, "temp_input.docx")
+                temp_docx_masked = os.path.join(temp_dir, "temp_masked.docx")
+                
+                # Step 1: PDF -> DOCX
+                logger.info("Converting PDF to Word document...")
+                self.pdf_to_docx(input_pdf_path, temp_docx_input)
+                
+                # Step 2: Mask DOCX
+                logger.info("Applying PII masking to Word document...")
+                stats = self.mask_docx(temp_docx_input, temp_docx_masked, pii_configs)
+                
+                # Step 3: DOCX -> PDF
+                logger.info("Converting masked Word document back to PDF...")
+                self.docx_to_pdf(temp_docx_masked, output_pdf_path)
+                
+            else:
+                # Step 1: PDF -> Text
+                logger.info("Extracting text from PDF...")
+                text = self.pdf_to_text(input_pdf_path)
+                
+                # Step 2: Mask Text
+                logger.info("Applying PII masking to text...")
+                masked_text, stats = self.mask_text(text, pii_configs)
+                
+                # Step 3: Text -> PDF
+                logger.info("Converting masked text back to PDF...")
+                self.text_to_pdf(masked_text, output_pdf_path)
+            
+            # Clean up temporary files
+            import shutil
+            shutil.rmtree(temp_dir)
+            
+            logger.info(f"PDF processing completed: {output_pdf_path}")
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Error in PDF text conversion workflow: {e}")
+            raise
+
 def main():
     """Main function for command-line usage."""
     print("BERT PII Masker with Configurable Strategies")
@@ -1204,17 +1442,34 @@ def main():
     
     if len(sys.argv) < 3:
         print("Usage:")
-        print("  python bert_pii_masker.py <input.pdf> <output.pdf> <config_file>")
-        print("  python bert_pii_masker.py <input.pdf> <output.pdf> --interactive")
+        print("  python bert_pii_masker.py <input.pdf> <output.pdf> <config_file> [--method=<method>]")
+        print("  python bert_pii_masker.py <input.pdf> <output.pdf> --interactive [--method=<method>]")
         print("  python bert_pii_masker.py --sample-config")
+        print("")
+        print("Methods:")
+        print("  --method=direct    : Direct PDF editing (default, preserves layout)")
+        print("  --method=text      : PDF -> Text -> PDF conversion")
+        print("  --method=docx      : PDF -> Word -> PDF conversion")
         print("")
         print("Examples:")
         print("  python bert_pii_masker.py document.pdf masked.pdf pii_config.txt")
-        print("  python bert_pii_masker.py document.pdf masked.pdf --interactive")
+        print("  python bert_pii_masker.py document.pdf masked.pdf pii_config.txt --method=docx")
+        print("  python bert_pii_masker.py document.pdf masked.pdf --interactive --method=text")
         return 1
     
     input_pdf = sys.argv[1]
     output_pdf = sys.argv[2]
+    
+    # Parse method parameter
+    method = "docx"  # default method
+    for arg in sys.argv:
+        if arg.startswith("--method="):
+            method = arg.split("=")[1].lower()
+            break
+    
+    if method not in ["direct", "text", "docx"]:
+        print(f"Error: Invalid method '{method}'. Use 'direct', 'text', or 'docx'")
+        return 1
     
     if not os.path.exists(input_pdf):
         print(f"Error: Input file '{input_pdf}' not found")
@@ -1227,7 +1482,7 @@ def main():
     try:
         # Initialize the masker
         masker = BERTPIIMasker()
-        if len(sys.argv) > 3:
+        if len(sys.argv) > 3 and not sys.argv[3].startswith("--"):
             # Configuration file mode
             config_input = sys.argv[3]
             pii_configs = masker.parse_pii_config(config_input)
@@ -1239,9 +1494,18 @@ def main():
             print("No PII configurations found. Exiting.")
             return 1
         
-        # Process the PDF
-        print(f"\nProcessing PDF with {len(pii_configs)} PII configurations...")
-        stats = masker.mask_pdf_with_config(input_pdf, output_pdf, pii_configs)
+        # Process the PDF based on selected method
+        print(f"\nProcessing PDF with {len(pii_configs)} PII configurations using {method} method...")
+        
+        if method == "direct":
+            # Original direct PDF editing method
+            stats = masker.mask_pdf_with_config(input_pdf, output_pdf, pii_configs)
+        elif method == "text":
+            # PDF -> Text -> PDF method
+            stats = masker.process_pdf_via_text_conversion(input_pdf, output_pdf, pii_configs, use_docx=False)
+        elif method == "docx":
+            # PDF -> Word -> PDF method
+            stats = masker.process_pdf_via_text_conversion(input_pdf, output_pdf, pii_configs, use_docx=True)
         
         # Generate and save report
         report_path = output_pdf.replace('.pdf', '_masking_report.txt')
@@ -1254,10 +1518,17 @@ def main():
         print(f"Input PDF: {input_pdf}")
         print(f"Output PDF: {output_pdf}")
         print(f"Report: {report_path}")
+        print(f"Method Used: {method}")
         print("\nSummary:")
-        print(f"  • Pages processed: {stats['pages_processed']}/{stats['total_pages']}")
-        print(f"  • PII instances masked: {stats['total_pii_masked']}")
-        print(f"  • Failed maskings: {stats['failed_maskings']}")
+        
+        # Handle different stats formats
+        if method == "direct":
+            print(f"  • Pages processed: {stats.get('pages_processed', 'N/A')}/{stats.get('total_pages', 'N/A')}")
+            print(f"  • PII instances masked: {stats['total_pii_masked']}")
+            print(f"  • Failed maskings: {stats.get('failed_maskings', 0)}")
+        else:
+            print(f"  • PII instances masked: {stats['total_pii_masked']}")
+            print(f"  • Failed maskings: {stats.get('failed_maskings', 0)}")
         
         if stats['strategies_used']:
             print("\nStrategies Used:")

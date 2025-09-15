@@ -415,29 +415,86 @@ export default function SyntheticDataGenerator() {
           </Card>
         </motion.div>
       )}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Generation History */}
+        <Card className="neumorphic-card">
+          <CardHeader>
+            <CardTitle>Generation History</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {generationJobs.filter((job) => job.status === "completed")
+              .length === 0 ? (
+              <div className="text-center py-8">
+                <Clock
+                  size={48}
+                  className="mx-auto text-muted-foreground mb-4"
+                />
+                <p className="text-muted-foreground">
+                  No completed generation jobs yet
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {generationJobs
+                  .filter((job) => job.status === "completed")
+                  .slice(0, 5)
+                  .map((job) => (
+                    <motion.div
+                      key={job.job_id}
+                      className="neumorphic-pressed p-4 rounded-lg"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          {getStatusIcon(job.status)}
+                          <div>
+                            <p className="font-medium text-foreground">
+                              {job.document_name}
+                            </p>
+                            <p className="text-sm text-muted-foreground">
+                              {job.num_datasets} datasets generated •{" "}
+                              {new Date(
+                                job.completed_at || job.created_at
+                              ).toLocaleDateString()}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Badge variant={getStatusBadgeVariant(job.status)}>
+                            {getStatusDisplayText(job.status)}
+                          </Badge>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
-      {/* Generation History */}
-      <Card className="neumorphic-card">
-        <CardHeader>
-          <CardTitle>Generation History</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {generationJobs.filter((job) => job.status === "completed").length ===
-          0 ? (
-            <div className="text-center py-8">
-              <Clock size={48} className="mx-auto text-muted-foreground mb-4" />
-              <p className="text-muted-foreground">
-                No completed generation jobs yet
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {generationJobs
-                .filter((job) => job.status === "completed")
-                .slice(0, 5)
-                .map((job) => (
+        {/* Generated Datasets */}
+        <Card className="neumorphic-card">
+          <CardHeader>
+            <CardTitle>Generated Datasets</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {syntheticDatasets.length === 0 ? (
+              <div className="text-center py-8">
+                <FileText
+                  size={48}
+                  className="mx-auto text-muted-foreground mb-4"
+                />
+                <p className="text-muted-foreground">
+                  No synthetic datasets generated yet
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {syntheticDatasets.map((dataset) => (
                   <motion.div
-                    key={job.job_id}
+                    key={dataset.id}
                     className="neumorphic-pressed p-4 rounded-lg"
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -445,118 +502,65 @@ export default function SyntheticDataGenerator() {
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
-                        {getStatusIcon(job.status)}
+                        <FileText size={20} className="text-primary" />
                         <div>
                           <p className="font-medium text-foreground">
-                            {job.document_name}
+                            {dataset.synthetic_name}
                           </p>
                           <p className="text-sm text-muted-foreground">
-                            {job.num_datasets} datasets generated •{" "}
-                            {new Date(
-                              job.completed_at || job.created_at
-                            ).toLocaleDateString()}
+                            From: {dataset.original_name} • Dataset #
+                            {dataset.dataset_number}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {(dataset.size / 1024).toFixed(1)} KB •{" "}
+                            {new Date(dataset.created_at).toLocaleDateString()}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center space-x-2">
-                        <Badge variant={getStatusBadgeVariant(job.status)}>
-                          {getStatusDisplayText(job.status)}
-                        </Badge>
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handlePreviewDataset(dataset)}
+                              className="neumorphic-button"
+                            >
+                              <Eye size={16} className="mr-2" />
+                              Preview
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="max-w-4xl max-h-[80vh]">
+                            <DialogHeader>
+                              <DialogTitle>
+                                Preview: {previewDataset?.synthetic_name}
+                              </DialogTitle>
+                            </DialogHeader>
+                            <ScrollArea className="h-96 w-full border rounded p-4">
+                              <pre className="text-sm whitespace-pre-wrap">
+                                {previewContent}
+                              </pre>
+                            </ScrollArea>
+                          </DialogContent>
+                        </Dialog>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDownloadDataset(dataset)}
+                          className="neumorphic-button"
+                        >
+                          <Download size={16} className="mr-2" />
+                          Download
+                        </Button>
                       </div>
                     </div>
                   </motion.div>
                 ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Generated Datasets */}
-      <Card className="neumorphic-card">
-        <CardHeader>
-          <CardTitle>Generated Datasets</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {syntheticDatasets.length === 0 ? (
-            <div className="text-center py-8">
-              <FileText
-                size={48}
-                className="mx-auto text-muted-foreground mb-4"
-              />
-              <p className="text-muted-foreground">
-                No synthetic datasets generated yet
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {syntheticDatasets.map((dataset) => (
-                <motion.div
-                  key={dataset.id}
-                  className="neumorphic-pressed p-4 rounded-lg"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <FileText size={20} className="text-primary" />
-                      <div>
-                        <p className="font-medium text-foreground">
-                          {dataset.synthetic_name}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          From: {dataset.original_name} • Dataset #
-                          {dataset.dataset_number}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          {(dataset.size / 1024).toFixed(1)} KB •{" "}
-                          {new Date(dataset.created_at).toLocaleDateString()}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                      <Dialog>
-                        <DialogTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handlePreviewDataset(dataset)}
-                            className="neumorphic-button"
-                          >
-                            <Eye size={16} className="mr-2" />
-                            Preview
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent className="max-w-4xl max-h-[80vh]">
-                          <DialogHeader>
-                            <DialogTitle>
-                              Preview: {previewDataset?.synthetic_name}
-                            </DialogTitle>
-                          </DialogHeader>
-                          <ScrollArea className="h-96 w-full border rounded p-4">
-                            <pre className="text-sm whitespace-pre-wrap">
-                              {previewContent}
-                            </pre>
-                          </ScrollArea>
-                        </DialogContent>
-                      </Dialog>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleDownloadDataset(dataset)}
-                        className="neumorphic-button"
-                      >
-                        <Download size={16} className="mr-2" />
-                        Download
-                      </Button>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
