@@ -554,6 +554,76 @@ Return ONLY the JSON array, no additional text or explanation."""
             logger.error(f"Error extracting text from PDF: {e}")
             raise
     
+    def extract_text_from_docx(self, docx_path: str) -> List[Tuple[str, int]]:
+        """Extract text from Word document."""
+        try:
+            from docx import Document
+            
+            doc = Document(docx_path)
+            full_text = []
+            
+            # Extract text from paragraphs
+            for paragraph in doc.paragraphs:
+                full_text.append(paragraph.text)
+            
+            # Extract text from tables
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        full_text.append(cell.text)
+            
+            # Join all text and return as single page
+            combined_text = '\n'.join(full_text)
+            return [(combined_text, 0)]  # Treat as single page (page 0)
+            
+        except ImportError:
+            logger.error("python-docx not found. Please install: pip install python-docx")
+            raise
+        except Exception as e:
+            logger.error(f"Error extracting text from DOCX: {e}")
+            raise
+    
+    def extract_text_from_txt(self, txt_path: str) -> List[Tuple[str, int]]:
+        """Extract text from plain text file."""
+        try:
+            with open(txt_path, 'r', encoding='utf-8') as file:
+                text = file.read()
+            
+            # Return as single page (page 0)
+            return [(text, 0)]
+            
+        except UnicodeDecodeError:
+            # Try with different encodings
+            encodings = ['latin1', 'cp1252', 'utf-16']
+            for encoding in encodings:
+                try:
+                    with open(txt_path, 'r', encoding=encoding) as file:
+                        text = file.read()
+                    return [(text, 0)]
+                except UnicodeDecodeError:
+                    continue
+            logger.error("Failed to decode text file with any common encoding")
+            raise
+        except Exception as e:
+            logger.error(f"Error extracting text from TXT: {e}")
+            raise
+    
+    def extract_text_from_document(self, document_path: str) -> List[Tuple[str, int]]:
+        """
+        Extract text from any supported document format.
+        Returns: List of (page_text, page_num)
+        """
+        file_extension = os.path.splitext(document_path)[1].lower()
+        
+        if file_extension == '.pdf':
+            return self.extract_text_from_pdf(document_path)
+        elif file_extension == '.docx':
+            return self.extract_text_from_docx(document_path)
+        elif file_extension == '.txt':
+            return self.extract_text_from_txt(document_path)
+        else:
+            raise ValueError(f"Unsupported file format: {file_extension}")
+    
     def extract_text_with_coordinates(self, pdf_path: str) -> List[Tuple[str, int, fitz.Document]]:
         """
         Extract text from PDF pages while keeping the document open for coordinate lookup.
@@ -788,6 +858,41 @@ Return ONLY the JSON array, no additional text or explanation."""
         logger.info(f"Configuration file saved to: {output_path}")
         return stats
     
+    def process_document(self, document_path: str, output_config_path: str, interactive: bool = False) -> Dict[str, Any]:
+        """Process any supported document format and generate configuration file."""
+        logger.info(f"Processing document: {document_path}")
+        
+        file_extension = os.path.splitext(document_path)[1].lower()
+        
+        if file_extension == '.pdf':
+            return self.process_pdf(document_path, output_config_path, interactive)
+        else:
+            return self.process_non_pdf_document(document_path, output_config_path, interactive)
+    
+    def process_non_pdf_document(self, document_path: str, output_config_path: str, interactive: bool = False) -> Dict[str, Any]:
+        """Process non-PDF documents (DOCX, TXT) without coordinate information."""
+        logger.info(f"Processing non-PDF document: {document_path}")
+        
+        # Extract text from document
+        pages_data = self.extract_text_from_document(document_path)
+        
+        # Detect PII in all pages (without coordinates)
+        all_detected_pii = []
+        
+        for page_text, page_num in pages_data:
+            if page_text.strip():
+                # For non-PDF documents, we don't have coordinate information
+                page_pii = self.detect_all_pii(page_text, page_num, doc=None)
+                all_detected_pii.extend(page_pii)
+        
+        if not all_detected_pii:
+            logger.warning("No PII detected in the document")
+            return {"total_pii": 0, "strategies": {}, "types": {}}
+        
+        # Generate configuration file without coordinates
+        stats = self.generate_config_file(all_detected_pii, output_config_path, interactive)
+        
+        return stats
     
     def process_pdf(self, pdf_path: str, output_config_path: str, interactive: bool = False) -> Dict[str, Any]:
         """Process PDF and generate configuration file with coordinates."""
@@ -860,22 +965,28 @@ def main():
     
     if len(sys.argv) < 2:
         print("Usage:")
-        print("  python pii_detector_config_generator.py <input.pdf> [output_config.txt]")
-        print("  python pii_detector_config_generator.py <input.pdf> --interactive")
+        print("  python pii_detector_config_generator.py <input_document> [output_config.txt]")
+        print("  python pii_detector_config_generator.py <input_document> --interactive")
+        print("")
+        print("Supported formats: PDF (.pdf), Word (.docx), Text (.txt)")
         print("")
         print("Examples:")
         print("  python pii_detector_config_generator.py document.pdf config.txt")
-        print("  python pii_detector_config_generator.py document.pdf --interactive")
+        print("  python pii_detector_config_generator.py document.docx config.txt")
+        print("  python pii_detector_config_generator.py document.txt --interactive")
         return 1
     
-    input_pdf = sys.argv[1]
+    input_document = sys.argv[1]
     
-    if not os.path.exists(input_pdf):
-        print(f"Error: Input file '{input_pdf}' not found")
+    if not os.path.exists(input_document):
+        print(f"Error: Input file '{input_document}' not found")
         return 1
     
-    if not input_pdf.lower().endswith('.pdf'):
-        print(f"Error: Input file must be a PDF")
+    # Check for supported file types
+    file_extension = os.path.splitext(input_document)[1].lower()
+    supported_extensions = ['.pdf', '.docx', '.txt']
+    if file_extension not in supported_extensions:
+        print(f"Error: Unsupported file format. Supported formats: {', '.join(supported_extensions)}")
         return 1
     
     # Determine output configuration file
@@ -883,21 +994,21 @@ def main():
     if len(sys.argv) > 2:
         if sys.argv[2] == "--interactive":
             interactive_mode = True
-            output_config = input_pdf.replace('.pdf', '_pii_config.txt')
+            output_config = input_document.replace(file_extension, '_pii_config.txt')
         else:
             output_config = sys.argv[2]
     else:
-        output_config = input_pdf.replace('.pdf', '_pii_config.txt')
+        output_config = input_document.replace(file_extension, '_pii_config.txt')
     
     try:
         # Initialize detector
         detector = PIIDetectorConfigGenerator()
         
-        # Process PDF
-        stats = detector.process_pdf(input_pdf, output_config, interactive_mode)
+        # Process document (supports PDF, DOCX, TXT)
+        stats = detector.process_document(input_document, output_config, interactive_mode)
         
         if stats["total_pii"] == 0:
-            print("\n✓ No PII detected in the document.")
+            print(f"\n✓ No PII detected in the document.")
             return 0
         
         # Generate detection report
@@ -908,7 +1019,7 @@ def main():
         print("\n" + "="*50)
         print("PII DETECTION COMPLETED!")
         print("="*50)
-        print(f"Input PDF: {input_pdf}")
+        print(f"Input document: {input_document}")
         print(f"Configuration file: {output_config}")
         print(f"Detection report: {report_path}")
         print("\nSummary:")
@@ -924,13 +1035,18 @@ def main():
             for strategy, count in stats['strategies'].items():
                 print(f"  • {strategy}: {count}")
         
-        print(f"\nNext step:")
-        print(f"python bert_pii_masker.py {input_pdf} masked_output.pdf {output_config}")
+        # Show next step depending on document type
+        if file_extension == '.pdf':
+            print(f"\nNext step:")
+            print(f"python bert_pii_masker.py {input_document} masked_output.pdf {output_config}")
+        else:
+            print(f"\nNote: For non-PDF documents, consider converting to PDF for masking:")
+            print(f"python bert_pii_masker.py {input_document} masked_output.pdf {output_config}")
         
         return 0
         
     except Exception as e:
-        logger.error(f"Error processing PDF: {e}")
+        logger.error(f"Error processing document: {e}")
         return 1
 
 if __name__ == "__main__":

@@ -799,6 +799,34 @@ export const simpleProcessingApi = {
 
   getMaskedPreviewUrl: (documentId: string) =>
     `${API_BASE_URL}/simple/preview-masked/${documentId}`,
+
+  // New MongoDB-based download endpoints
+  downloadFromMongo: (
+    documentId: string,
+    status: "uploaded" | "masked" = "masked"
+  ) =>
+    fetch(
+      `${API_BASE_URL}/simple/download-from-mongo/${documentId}?status=${status}`
+    ).then((response) => {
+      if (!response.ok) {
+        throw new Error("MongoDB download failed");
+      }
+      return response.blob();
+    }),
+
+  getMongoInfo: (documentId: string, status?: string) => {
+    const url = status
+      ? `${API_BASE_URL}/simple/mongo-info/${documentId}?status=${status}`
+      : `${API_BASE_URL}/simple/mongo-info/${documentId}`;
+
+    return fetch(url).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error?.message || "Failed to get MongoDB info");
+      }
+      return data;
+    });
+  },
 };
 
 // Query client for React Query

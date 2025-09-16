@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   Wand2,
@@ -11,12 +11,17 @@ import {
   Users,
   FileText,
   Home,
+  MapPin,
+  CreditCard,
+  Shield,
+  Tag,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -26,7 +31,6 @@ import {
 } from "@/components/ui/select";
 import { simpleProcessingApi } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
-import { Navigate } from "react-router-dom";
 
 interface PIIItem {
   id: string;
@@ -62,6 +66,78 @@ const maskingStrategies = [
   },
 ];
 
+// PII Category definitions
+const PII_CATEGORIES = {
+  person: {
+    label: "Person",
+    icon: Users,
+    description: "Names and personal identifiers",
+    types: ["PERSON"],
+  },
+  locationAddress: {
+    label: "Location/Address",
+    icon: MapPin,
+    description: "Geographic and address information",
+    types: ["ADDRESS", "LOC", "COORDINATES"],
+  },
+  codes: {
+    label: "Codes",
+    icon: Tag,
+    description: "Various codes and technical identifiers",
+    types: [
+      "ZIP_CODE",
+      "MAC_ADDRESS",
+      "IP_ADDRESS",
+      "VEHICLE_PLATE",
+      "BARCODE",
+      "VOLUNTEER_CODE",
+      "RECEIPT_NUMBER",
+      "TRACKING_NUMBER",
+      "URL",
+      "VACCINE_LOT",
+    ],
+  },
+  identityCards: {
+    label: "Identity Cards",
+    icon: Shield,
+    description: "Official identification documents",
+    types: [
+      "EMPLOYEE_ID",
+      "STUDENT_ID",
+      "PASSPORT",
+      "DRIVER_LICENSE",
+      "SSN",
+      "PAN",
+      "AADHAAR",
+      "INSURANCE_ID",
+      "MEDICAL_RECORD",
+    ],
+  },
+  others: {
+    label: "Others",
+    icon: CreditCard,
+    description: "Financial and miscellaneous information",
+    types: [
+      "DATE_OF_BIRTH",
+      "PHONE",
+      "EMAIL",
+      "BANK_ACCOUNT",
+      "ORG",
+      "CREDIT_CARD",
+      "ORGANISATIONS",
+    ],
+  },
+};
+
+const getCategoryForPIIType = (type: string): string => {
+  for (const [categoryKey, category] of Object.entries(PII_CATEGORIES)) {
+    if (category.types.includes(type)) {
+      return categoryKey;
+    }
+  }
+  return "others"; // Default fallback
+};
+
 export function SimpleMaskingStep({
   detectedPIIData,
   onMaskingComplete,
@@ -72,8 +148,36 @@ export function SimpleMaskingStep({
   const [maskingProgress, setMaskingProgress] = useState(0);
   const [maskingResults, setMaskingResults] = useState<any>(null);
   const [showPreview, setShowPreview] = useState(true);
+  const [activeTab, setActiveTab] = useState("person");
   const { toast } = useToast();
   const navigate = useNavigate();
+
+  // Group PII items by category
+  const categorizedPII = React.useMemo(() => {
+    const grouped: { [key: string]: PIIItem[] } = {};
+
+    // Initialize all categories
+    Object.keys(PII_CATEGORIES).forEach((category) => {
+      grouped[category] = [];
+    });
+
+    // Group items by category
+    configData.forEach((item) => {
+      const category = getCategoryForPIIType(item.type);
+      grouped[category].push(item);
+    });
+
+    return grouped;
+  }, [configData]);
+
+  // Get counts for each category
+  const categoryCounts = React.useMemo(() => {
+    const counts: { [key: string]: number } = {};
+    Object.keys(PII_CATEGORIES).forEach((category) => {
+      counts[category] = categorizedPII[category]?.length || 0;
+    });
+    return counts;
+  }, [categorizedPII]);
 
   useEffect(() => {
     if (detectedPIIData?.config_data) {
@@ -82,6 +186,19 @@ export function SimpleMaskingStep({
       setSelectedItems(
         new Set(detectedPIIData.config_data.map((item) => item.id))
       );
+
+      // Set the active tab to the first category that has items
+      const firstCategoryWithItems = Object.keys(PII_CATEGORIES).find(
+        (categoryKey) => {
+          return detectedPIIData.config_data.some(
+            (item) => getCategoryForPIIType(item.type) === categoryKey
+          );
+        }
+      );
+
+      if (firstCategoryWithItems) {
+        setActiveTab(firstCategoryWithItems);
+      }
     }
   }, [detectedPIIData]);
 
@@ -111,6 +228,124 @@ export function SimpleMaskingStep({
     } else {
       setSelectedItems(new Set(configData.map((item) => item.id)));
     }
+  };
+
+  const handleSelectCategory = (category: string) => {
+    const categoryItems = categorizedPII[category] || [];
+    const categoryIds = new Set(categoryItems.map((item) => item.id));
+
+    // Check if all items in category are selected
+    const allSelected = categoryItems.every((item) =>
+      selectedItems.has(item.id)
+    );
+
+    setSelectedItems((prev) => {
+      const newSet = new Set(prev);
+      if (allSelected) {
+        // Deselect all items in category
+        categoryIds.forEach((id) => newSet.delete(id));
+      } else {
+        // Select all items in category
+        categoryIds.forEach((id) => newSet.add(id));
+      }
+      return newSet;
+    });
+  };
+
+  const getCategorySelectionState = (category: string) => {
+    const categoryItems = categorizedPII[category] || [];
+    if (categoryItems.length === 0) return "none";
+
+    const selectedInCategory = categoryItems.filter((item) =>
+      selectedItems.has(item.id)
+    ).length;
+
+    if (selectedInCategory === 0) return "none";
+    if (selectedInCategory === categoryItems.length) return "all";
+    return "partial";
+  };
+
+  const renderPIIItems = (items: PIIItem[]) => {
+    if (items.length === 0) {
+      return (
+        <div className="text-center py-8 text-muted-foreground">
+          <p>No PII items found in this category.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-2">
+        {items.map((item) => (
+          <div
+            key={item.id}
+            className={`p-4 border rounded-lg transition-colors ${
+              selectedItems.has(item.id)
+                ? "bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800"
+                : "hover:bg-gray-50 dark:hover:bg-gray-800"
+            }`}
+          >
+            <div className="flex items-start space-x-4">
+              <input
+                type="checkbox"
+                checked={selectedItems.has(item.id)}
+                onChange={(e) => handleSelectItem(item.id, e.target.checked)}
+                className="mt-1"
+              />
+              <div className="flex-1 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <span className="font-medium">
+                      {getTypeDisplayName(item.type)}
+                    </span>
+                    <Badge
+                      variant={getSeverityColor(item.severity) as any}
+                      className="text-xs"
+                    >
+                      {item.severity}
+                    </Badge>
+                  </div>
+                  <span className="text-sm text-muted-foreground">
+                    {item.location}
+                  </span>
+                </div>
+                <p className="text-sm font-mono bg-gray-100 dark:bg-gray-800 p-2 rounded">
+                  {item.text}
+                </p>
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm text-muted-foreground">
+                    Strategy:
+                  </span>
+                  <Select
+                    value={item.suggested_strategy}
+                    onValueChange={(value) =>
+                      handleStrategyChange(item.id, value)
+                    }
+                    disabled={!selectedItems.has(item.id)}
+                  >
+                    <SelectTrigger className="w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {maskingStrategies.map((strategy) => (
+                        <SelectItem key={strategy.value} value={strategy.value}>
+                          <div>
+                            <div className="font-medium">{strategy.label}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {strategy.description}
+                            </div>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
   };
 
   const handleApplyMasking = async () => {
@@ -195,9 +430,20 @@ export function SimpleMaskingStep({
     if (!maskingResults) return;
 
     try {
-      const blob = await simpleProcessingApi.downloadMaskedDocument(
-        maskingResults.masked_document_id || maskingResults.document_id
-      );
+      // Try downloading from local storage first, then fallback to MongoDB
+      let blob;
+      try {
+        blob = await simpleProcessingApi.downloadMaskedDocument(
+          maskingResults.masked_document_id || maskingResults.document_id
+        );
+      } catch (localError) {
+        console.log("Local download failed, trying MongoDB:", localError);
+        // Fallback to MongoDB download
+        blob = await simpleProcessingApi.downloadFromMongo(
+          maskingResults.document_id,
+          "masked"
+        );
+      }
 
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -464,7 +710,7 @@ export function SimpleMaskingStep({
         </motion.div>
       )}
 
-      {/* PII Configuration Table */}
+      {/* PII Configuration with Tabs */}
       {showPreview && !maskingResults && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -490,84 +736,101 @@ export function SimpleMaskingStep({
           </div>
 
           <Card>
-            <CardContent className="p-0">
-              <div className="space-y-2 p-4">
-                {configData.map((item) => (
-                  <div
-                    key={item.id}
-                    className={`p-4 border rounded-lg transition-colors ${
-                      selectedItems.has(item.id)
-                        ? "bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800"
-                        : "hover:bg-gray-50 dark:hover:bg-gray-800"
-                    }`}
-                  >
-                    <div className="flex items-start space-x-4">
-                      <input
-                        type="checkbox"
-                        checked={selectedItems.has(item.id)}
-                        onChange={(e) =>
-                          handleSelectItem(item.id, e.target.checked)
-                        }
-                        className="mt-1"
-                      />
-                      <div className="flex-1 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-2">
-                            <span className="font-medium">
-                              {getTypeDisplayName(item.type)}
-                            </span>
-                            <Badge
-                              variant={getSeverityColor(item.severity) as any}
-                              className="text-xs"
-                            >
-                              {item.severity}
-                            </Badge>
-                          </div>
-                          <span className="text-sm text-muted-foreground">
-                            {item.location}
+            <CardContent className="p-6">
+              <Tabs
+                value={activeTab}
+                onValueChange={setActiveTab}
+                className="w-full"
+              >
+                <TabsList className="grid w-full grid-cols-5">
+                  {Object.entries(PII_CATEGORIES).map(
+                    ([categoryKey, category]) => {
+                      const Icon = category.icon;
+                      const count = categoryCounts[categoryKey];
+                      const selectionState =
+                        getCategorySelectionState(categoryKey);
+
+                      return (
+                        <TabsTrigger
+                          key={categoryKey}
+                          value={categoryKey}
+                          className="flex items-center space-x-2 relative"
+                        >
+                          <Icon className="w-4 h-4" />
+                          <span className="hidden sm:inline">
+                            {category.label}
                           </span>
-                        </div>
-                        <p className="text-sm font-mono bg-gray-100 dark:bg-gray-800 p-2 rounded">
-                          {item.text}
-                        </p>
-                        <div className="flex items-center space-x-2">
-                          <span className="text-sm text-muted-foreground">
-                            Strategy:
-                          </span>
-                          <Select
-                            value={item.suggested_strategy}
-                            onValueChange={(value) =>
-                              handleStrategyChange(item.id, value)
-                            }
-                            disabled={!selectedItems.has(item.id)}
+                          <Badge
+                            variant="secondary"
+                            className={`text-xs ${
+                              selectionState === "all"
+                                ? "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300"
+                                : selectionState === "partial"
+                                ? "bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300"
+                                : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                            }`}
                           >
-                            <SelectTrigger className="w-40">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {maskingStrategies.map((strategy) => (
-                                <SelectItem
-                                  key={strategy.value}
-                                  value={strategy.value}
-                                >
-                                  <div>
-                                    <div className="font-medium">
-                                      {strategy.label}
-                                    </div>
-                                    <div className="text-xs text-muted-foreground">
-                                      {strategy.description}
-                                    </div>
-                                  </div>
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            {count}
+                          </Badge>
+                        </TabsTrigger>
+                      );
+                    }
+                  )}
+                </TabsList>
+
+                {Object.entries(PII_CATEGORIES).map(
+                  ([categoryKey, category]) => (
+                    <TabsContent
+                      key={categoryKey}
+                      value={categoryKey}
+                      className="space-y-4 mt-6"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-1">
+                          <h4 className="text-lg font-semibold flex items-center">
+                            <category.icon className="w-5 h-5 mr-2" />
+                            {category.label}
+                          </h4>
+                          <p className="text-sm text-muted-foreground">
+                            {category.description}
+                          </p>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <Badge variant="outline" className="text-sm">
+                            {categoryCounts[categoryKey]} items
+                          </Badge>
+                          {categoryCounts[categoryKey] > 0 && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleSelectCategory(categoryKey)}
+                            >
+                              {getCategorySelectionState(categoryKey) ===
+                              "all" ? (
+                                <>
+                                  <Square className="w-4 h-4 mr-2" />
+                                  Deselect All
+                                </>
+                              ) : (
+                                <>
+                                  <CheckSquare className="w-4 h-4 mr-2" />
+                                  Select All
+                                </>
+                              )}
+                            </Button>
+                          )}
                         </div>
                       </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+
+                      <div className="border rounded-lg">
+                        <div className="p-4">
+                          {renderPIIItems(categorizedPII[categoryKey] || [])}
+                        </div>
+                      </div>
+                    </TabsContent>
+                  )
+                )}
+              </Tabs>
             </CardContent>
           </Card>
         </motion.div>

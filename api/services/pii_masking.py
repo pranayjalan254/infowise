@@ -6,7 +6,6 @@ with overlap resolution and multiple detection methods.
 
 import os
 import tempfile
-import subprocess
 from typing import Dict, Any, List
 from flask import Blueprint, request, current_app, send_file
 from flask_jwt_extended import jwt_required, get_jwt_identity
@@ -475,42 +474,4 @@ def get_masking_status(document_id: str):
     except Exception as e:
         current_app.logger.error(f"Get masking status error: {str(e)}")
         return error_response("STATUS_ERROR", "Failed to retrieve masking status", 500)
-    """Get masking status and results for a document."""
-    try:
-        user_id = get_jwt_identity()
-        
-        # Get document metadata
-        metadata = mongo_db.get_document_metadata(document_id, user_id)
-        if not metadata:
-            return error_response("NOT_FOUND", "Document not found", 404)
-        
-        # Get masking results
-        masking_results = metadata.get('metadata', {}).get('masking_results')
-        if not masking_results:
-            return success_response(
-                data={
-                    'document_id': document_id,
-                    'status': 'not_started',
-                    'message': 'Masking has not been applied to this document'
-                },
-                message="No masking results found"
-            )
-        
-        return success_response(
-            data={
-                'document_id': document_id,
-                'status': masking_results['status'],
-                'masked_document_id': masking_results.get('masked_document_id'),
-                'masked_filename': masking_results.get('masked_filename'),
-                'masking_date': masking_results.get('masking_date'),
-                'total_pii_masked': masking_results.get('total_pii_masked', 0),
-                'strategies_used': masking_results.get('strategies_used', {}),
-                'failed_maskings': masking_results.get('failed_maskings', 0),
-                'stats': masking_results.get('stats', {})
-            },
-            message="Masking status retrieved successfully"
-        )
-        
-    except Exception as e:
-        current_app.logger.error(f"Get masking status error: {str(e)}")
-        return error_response("STATUS_ERROR", "Failed to retrieve masking status", 500)
+

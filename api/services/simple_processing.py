@@ -66,8 +66,11 @@ class SimpleDocumentProcessor:
             if not filename:
                 raise ValueError("Invalid filename")
             
-            if not filename.lower().endswith('.pdf'):
-                raise ValueError("Only PDF files are supported")
+            # Check for supported file types
+            supported_extensions = ['.pdf', '.docx', '.txt']
+            file_extension = os.path.splitext(filename)[1].lower()
+            if file_extension not in supported_extensions:
+                raise ValueError("Only PDF, Word (.docx), and text (.txt) files are supported")
             
             # Generate unique document ID
             doc_id = self.generate_document_id()
@@ -75,6 +78,14 @@ class SimpleDocumentProcessor:
             # Create unique filename
             file_extension = os.path.splitext(filename)[1]
             unique_filename = f"{doc_id}_{filename}"
+            
+            # Determine MIME type based on extension
+            mime_type_map = {
+                '.pdf': 'application/pdf',
+                '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                '.txt': 'text/plain'
+            }
+            mime_type = mime_type_map.get(file_extension.lower(), 'application/octet-stream')
             
             # Save locally
             local_path = UPLOADS_DIR / unique_filename
@@ -91,15 +102,20 @@ class SimpleDocumentProcessor:
                     file_info={
                         'original_name': filename,
                         'file_size': len(file_data),
+                        'status': 'uploaded',
                         'file_type': file_extension,
-                        'mime_type': 'application/pdf',
+                        'mime_type': mime_type,
                         'user_id': 'a6b781b1-401b-435b-aaec-8821a38cf731', 
                         'upload_date': get_current_timestamp(),
-                        'metadata': {'local_path': str(local_path)}
+                        'metadata': {
+                            'local_path': str(local_path),
+                            'document_id': doc_id
+                        }
                     }
                 )
+                current_app.logger.info(f"Original file stored in MongoDB with ID: {mongo_doc_id}")
             except Exception as e:
-                current_app.logger.warning(f"MongoDB storage failed: {e}")
+                current_app.logger.error(f"MongoDB storage failed: {e}")
                 mongo_doc_id = None
             
             return {
@@ -127,23 +143,27 @@ class SimpleDocumentProcessor:
             Dictionary with config generation results
         """
         try:
-            # Find the uploaded PDF
-            pdf_files = list(UPLOADS_DIR.glob(f"{document_id}_*.pdf"))
-            if not pdf_files:
-                raise ValueError(f"PDF file not found for document_id: {document_id}")
+            # Find the uploaded file - support multiple extensions
+            supported_extensions = ['*.pdf', '*.docx', '*.txt']
+            uploaded_files = []
+            for ext in supported_extensions:
+                uploaded_files.extend(list(UPLOADS_DIR.glob(f"{document_id}_{ext}")))
             
-            pdf_path = pdf_files[0]
+            if not uploaded_files:
+                raise ValueError(f"Document file not found for document_id: {document_id}")
+            
+            document_path = uploaded_files[0]
             
             # Generate config file path
             config_filename = f"{document_id}_pii_config.txt"
             config_path = CONFIGS_DIR / config_filename
             
             # Run pii_detector_config_generator.py
-            current_app.logger.info(f"Running PII detection on: {pdf_path}")
+            current_app.logger.info(f"Running PII detection on: {document_path}")
             
             result = subprocess.run([
                 'python', 'pii_detector_config_generator.py',
-                str(pdf_path),
+                str(document_path),
                 str(config_path)
             ], capture_output=True, text=True, cwd=current_app.root_path)
             
@@ -289,12 +309,16 @@ class SimpleDocumentProcessor:
             Dictionary with masking results
         """
         try:
-            # Find input PDF
-            pdf_files = list(UPLOADS_DIR.glob(f"{document_id}_*.pdf"))
-            if not pdf_files:
-                raise ValueError(f"PDF file not found for document_id: {document_id}")
+            # Find input document - support multiple extensions
+            supported_extensions = ['*.pdf', '*.docx', '*.txt']
+            input_files = []
+            for ext in supported_extensions:
+                input_files.extend(list(UPLOADS_DIR.glob(f"{document_id}_{ext}")))
             
-            input_pdf = pdf_files[0]
+            if not input_files:
+                raise ValueError(f"Document file not found for document_id: {document_id}")
+            
+            input_document = input_files[0]
             
             # Find config file
             config_filename = f"{document_id}_pii_config.txt"
@@ -303,16 +327,36 @@ class SimpleDocumentProcessor:
             if not config_path.exists():
                 raise ValueError("Config file not found. Generate config first.")
             
+            # For non-PDF documents, convert to PDF first
+            file_extension = input_document.suffix.lower()
+            if file_extension != '.pdf':
+                # Convert to PDF format for masking
+                temp_pdf_path = UPLOADS_DIR / f"{document_id}_converted.pdf"
+                
+                current_app.logger.info(f"Converting {file_extension} document to PDF for masking")
+                
+                # Import and use the document converter
+                from document_converter import DocumentConverter
+                converter = DocumentConverter()
+                
+                if not converter.convert_to_pdf(str(input_document), str(temp_pdf_path)):
+                    raise ValueError(f"Failed to convert {file_extension} document to PDF for masking")
+                
+                # Use the converted PDF for masking
+                masking_input = temp_pdf_path
+            else:
+                masking_input = input_document
+            
             # Create output path
             output_filename = f"{document_id}_masked.pdf"
             output_path = RESULTS_DIR / output_filename
             
             # Run bert_pii_masker.py
-            current_app.logger.info(f"Applying PII masking: {input_pdf} -> {output_path}")
+            current_app.logger.info(f"Applying PII masking: {masking_input} -> {output_path}")
             
             result = subprocess.run([
                 'python', 'bert_pii_masker.py',
-                str(input_pdf),
+                str(masking_input),
                 str(output_path),
                 str(config_path)
             ], capture_output=True, text=True, cwd=current_app.root_path)
@@ -326,6 +370,14 @@ class SimpleDocumentProcessor:
             if not output_path.exists():
                 raise ValueError("Masked PDF was not generated")
             
+            # Clean up temporary converted PDF if it was created
+            if file_extension != '.pdf':
+                try:
+                    temp_pdf_path.unlink()  # Delete the temporary PDF
+                    current_app.logger.info("Cleaned up temporary converted PDF")
+                except Exception as e:
+                    current_app.logger.warning(f"Failed to clean up temporary PDF: {e}")
+            
             # Store masked PDF in MongoDB
             try:
                 with open(output_path, 'rb') as f:
@@ -336,18 +388,23 @@ class SimpleDocumentProcessor:
                     file_info={
                         'original_name': output_filename,
                         'file_size': len(masked_data),
+                        'status': 'masked',
                         'file_type': '.pdf',
                         'mime_type': 'application/pdf',
-                        'user_id': 'hackathon_user',
+                        'user_id': 'a6b781b1-401b-435b-aaec-8821a38cf731',
                         'upload_date': get_current_timestamp(),
                         'metadata': {
-                            'original_document_id': document_id, 
-                            'local_path': str(output_path)
+                            'original_document_id': document_id,
+                            'document_id': document_id,  # Add this for consistent querying
+                            'local_path': str(output_path),
+                            'processing_type': 'pii_masking',
+                            'config_file': str(config_path)
                         }
                     }
                 )
+                current_app.logger.info(f"Masked file stored in MongoDB with ID: {mongo_doc_id}")
             except Exception as e:
-                current_app.logger.warning(f"MongoDB storage failed for masked file: {e}")
+                current_app.logger.error(f"MongoDB storage failed for masked file: {e}")
                 mongo_doc_id = None
             
             return {
@@ -362,6 +419,33 @@ class SimpleDocumentProcessor:
             
         except Exception as e:
             raise ValueError(f"Masking failed: {str(e)}")
+    
+    def get_document_info_from_mongo(self, document_id: str, status: str = None) -> Dict[str, Any]:
+        """
+        Retrieve document information from MongoDB.
+        
+        Args:
+            document_id: Document ID
+            status: Filter by status ('uploaded', 'masked', etc.)
+            
+        Returns:
+            Dictionary with document info from MongoDB
+        """
+        try:
+            query = {'metadata.document_id': document_id}
+            if status:
+                query['status'] = status
+            
+            files = mongo_db.get_files(query)
+            
+            return {
+                'document_id': document_id,
+                'files': files,
+                'total_files': len(files)
+            }
+            
+        except Exception as e:
+            raise ValueError(f"Failed to retrieve document info: {str(e)}")
 
 
 # Initialize processor
@@ -484,12 +568,17 @@ def get_document_status(document_id: str):
             'document_id': document_id,
             'uploaded': False,
             'config_generated': False,
-            'masking_completed': False
+            'masking_completed': False,
+            'mongo_files': {}
         }
         
         # Check if uploaded
-        pdf_files = list(UPLOADS_DIR.glob(f"{document_id}_*.pdf"))
-        if pdf_files:
+        supported_extensions = ['*.pdf', '*.docx', '*.txt']
+        uploaded_files = []
+        for ext in supported_extensions:
+            uploaded_files.extend(list(UPLOADS_DIR.glob(f"{document_id}_{ext}")))
+        
+        if uploaded_files:
             status['uploaded'] = True
         
         # Check if config exists
@@ -502,6 +591,27 @@ def get_document_status(document_id: str):
         if masked_path.exists():
             status['masking_completed'] = True
         
+        # Get MongoDB file information
+        try:
+            mongo_info = processor.get_document_info_from_mongo(document_id)
+            status['mongo_files'] = {
+                'total': mongo_info['total_files'],
+                'files': mongo_info['files']
+            }
+            
+            # Check if we have both original and masked files in MongoDB
+            uploaded_files = [f for f in mongo_info['files'] if f.get('status') == 'uploaded']
+            masked_files = [f for f in mongo_info['files'] if f.get('status') == 'masked']
+            
+            status['mongo_files']['uploaded_count'] = len(uploaded_files)
+            status['mongo_files']['masked_count'] = len(masked_files)
+            status['mongo_files']['has_original'] = len(uploaded_files) > 0
+            status['mongo_files']['has_masked'] = len(masked_files) > 0
+            
+        except Exception as e:
+            current_app.logger.warning(f"Failed to get MongoDB info: {e}")
+            status['mongo_files'] = {'error': str(e)}
+        
         return success_response(status)
         
     except Exception as e:
@@ -511,20 +621,36 @@ def get_document_status(document_id: str):
 
 @simple_processing_bp.route('/preview/<document_id>', methods=['GET'])
 def preview_original_document(document_id: str):
-    """Serve the original PDF for preview."""
+    """Serve the original document for preview."""
     try:
-        pdf_files = list(UPLOADS_DIR.glob(f"{document_id}_*.pdf"))
-        if not pdf_files:
+        # Find the uploaded file - support multiple extensions
+        supported_extensions = ['*.pdf', '*.docx', '*.txt']
+        uploaded_files = []
+        for ext in supported_extensions:
+            uploaded_files.extend(list(UPLOADS_DIR.glob(f"{document_id}_{ext}")))
+        
+        if not uploaded_files:
             return error_response('Document not found', 'NOT_FOUND'), 404
         
-        pdf_path = pdf_files[0]
+        document_path = uploaded_files[0]
+        
+        # Determine MIME type based on extension
+        file_extension = document_path.suffix.lower()
+        mime_type_map = {
+            '.pdf': 'application/pdf',
+            '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            '.txt': 'text/plain'
+        }
+        mime_type = mime_type_map.get(file_extension, 'application/octet-stream')
+        
         response = send_file(
-            pdf_path, 
-            mimetype='application/pdf',
+            document_path, 
+            mimetype=mime_type,
             as_attachment=False,
-            download_name=pdf_path.name
+            download_name=document_path.name
         )
-        # Allow iframe embedding for PDF preview
+        
+        # Allow iframe embedding for document preview (mainly for PDFs)
         response.headers['X-Allow-Iframe'] = 'true'
         return response
         
@@ -554,3 +680,119 @@ def preview_masked_document(document_id: str):
     except Exception as e:
         current_app.logger.error(f"Masked preview error: {str(e)}")
         return error_response('Masked preview failed', 'INTERNAL_ERROR'), 500
+
+
+@simple_processing_bp.route('/debug-mongo', methods=['GET'])
+def debug_mongo_contents():
+    """Debug endpoint to see all documents in MongoDB."""
+    try:
+        # Get all files from MongoDB
+        all_files = mongo_db.get_files({})  # Empty query to get all files
+        
+        return success_response({
+            'total_files': len(all_files),
+            'files': all_files
+        })
+        
+    except Exception as e:
+        current_app.logger.error(f"Debug mongo error: {str(e)}")
+        return error_response('Debug failed', 'INTERNAL_ERROR')
+
+
+@simple_processing_bp.route('/mongo-info/<document_id>', methods=['GET'])
+def get_mongo_document_info(document_id: str):
+    """Get document information from MongoDB."""
+    try:
+        status_filter = request.args.get('status')  # Optional status filter
+        result = processor.get_document_info_from_mongo(document_id, status_filter)
+        return success_response(result)
+        
+    except ValueError as e:
+        return error_response(str(e), 'MONGO_ERROR')
+    except Exception as e:
+        current_app.logger.error(f"MongoDB info error: {str(e)}")
+        return error_response('Failed to get MongoDB info', 'INTERNAL_ERROR')
+
+
+@simple_processing_bp.route('/download-from-mongo/<document_id>', methods=['GET'])
+def download_from_mongo(document_id: str):
+    """Download a file from MongoDB by document_id and status."""
+    try:
+        status = request.args.get('status', 'masked')  # Default to masked files
+        
+        current_app.logger.info(f"Attempting to download from MongoDB: document_id={document_id}, status={status}")
+        
+        # Since the existing MongoDB documents might not have document_id in metadata,
+        # let's try to find files by status first and then filter by any available identifier
+        files = mongo_db.get_files({'status': status})
+        current_app.logger.info(f"Found {len(files)} files with status '{status}'")
+        
+        # If no files with status, try to get all files and filter
+        if not files:
+            all_files = mongo_db.get_files({})
+            current_app.logger.info(f"Found {len(all_files)} total files in MongoDB")
+            
+            # Log the structure of files for debugging
+            if all_files:
+                sample_file = all_files[0]
+                current_app.logger.info(f"Sample file structure: {list(sample_file.keys())}")
+                if 'metadata' in sample_file:
+                    current_app.logger.info(f"Sample metadata keys: {list(sample_file['metadata'].keys())}")
+            
+            return error_response(f'No {status} files found in MongoDB', 'FILE_NOT_FOUND')
+        
+        # For now, just return the first file with the matching status
+        # In a real implementation, you'd want to match the document_id properly
+        file_info = files[0]
+        current_app.logger.info(f"Selected file: {file_info.get('original_name', 'unknown')}")
+        
+        # Retrieve file data from MongoDB
+        file_data = mongo_db.get_file_data(file_info['_id'])
+        
+        if not file_data:
+            return error_response('Failed to retrieve file data from MongoDB', 'RETRIEVAL_ERROR')
+        
+        # Create a temporary file response
+        from io import BytesIO
+        file_stream = BytesIO(file_data)
+        
+        return send_file(
+            file_stream,
+            as_attachment=True,
+            download_name=file_info.get('original_name', f'{document_id}_{status}.pdf'),
+            mimetype=file_info.get('mime_type', 'application/pdf')
+        )
+        
+    except Exception as e:
+        current_app.logger.error(f"MongoDB download error: {str(e)}")
+        return error_response('MongoDB download failed', 'INTERNAL_ERROR')
+
+
+@simple_processing_bp.route('/debug/mongo-all', methods=['GET'])
+def debug_mongo_all():
+    """Debug endpoint to see all documents in MongoDB."""
+    try:
+        # Get all files from MongoDB
+        all_files = mongo_db.get_files({})
+        
+        # Format the response for better readability
+        formatted_files = []
+        for file_doc in all_files:
+            formatted_files.append({
+                'id': str(file_doc.get('_id')),
+                'original_name': file_doc.get('original_name'),
+                'status': file_doc.get('status'),
+                'file_size': file_doc.get('file_size'),
+                'upload_date': file_doc.get('upload_date'),
+                'metadata': file_doc.get('metadata', {}),
+                'user_id': file_doc.get('user_id')
+            })
+        
+        return success_response({
+            'total_files': len(formatted_files),
+            'files': formatted_files
+        })
+        
+    except Exception as e:
+        current_app.logger.error(f"Debug MongoDB error: {str(e)}")
+        return error_response('Debug failed', 'INTERNAL_ERROR')

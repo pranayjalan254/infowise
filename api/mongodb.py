@@ -339,7 +339,7 @@ class MongoDatabase:
             return {
                 'total_documents': stats['total_documents'],
                 'total_size_bytes': stats['total_size'],
-                'total_size_mb': round(stats['total_size'] / (1024 * 1024), 2),
+                'total_size_mb': round(stats['total_size'] / (1024), 2),
                 'file_types': file_type_counts
             }
             
@@ -358,6 +358,78 @@ class MongoDatabase:
         if self._db is None:
             raise RuntimeError("MongoDB not properly initialized")
         return self._db
+
+    def get_files(self, query: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+        """
+        Get files based on query criteria.
+        
+        Args:
+            query: MongoDB query dictionary
+            
+        Returns:
+            List of file documents matching the query
+        """
+        if self._documents_collection is None:
+            raise RuntimeError("MongoDB not properly initialized")
+            
+        try:
+            if query is None:
+                query = {}
+                
+            documents = self._documents_collection.find(query).sort('upload_date', -1)
+            
+            result = []
+            for doc in documents:
+                result.append({
+                    '_id': doc['_id'],
+                    'user_id': doc['user_id'],
+                    'original_name': doc['original_name'],
+                    'file_size': doc['file_size'],
+                    'file_type': doc['file_type'],
+                    'mime_type': doc['mime_type'],
+                    'upload_date': doc['upload_date'],
+                    'status': doc['status'],
+                    'metadata': doc.get('metadata', {}),
+                    'file_id': doc['file_id']
+                })
+            
+            return result
+            
+        except Exception as e:
+            current_app.logger.error(f"Get files error: {str(e)}")
+            return []
+
+    def get_file_data(self, doc_id: ObjectId) -> Optional[bytes]:
+        """
+        Get file data by document ID.
+        
+        Args:
+            doc_id: Document ObjectId
+            
+        Returns:
+            File data bytes or None if not found
+        """
+        if self._fs is None or self._documents_collection is None:
+            raise RuntimeError("MongoDB not properly initialized")
+            
+        try:
+            # Get document to find file_id
+            document = self._documents_collection.find_one({'_id': doc_id})
+            
+            if not document:
+                return None
+            
+            # Get file from GridFS
+            try:
+                file_data = self._fs.get(document['file_id'])
+                return file_data.read()
+            except gridfs.errors.NoFile:
+                current_app.logger.error(f"File not found in GridFS for doc_id: {doc_id}")
+                return None
+                
+        except Exception as e:
+            current_app.logger.error(f"File data retrieval error: {str(e)}")
+            return None
 
 
 # Global MongoDB instance

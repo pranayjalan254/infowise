@@ -37,7 +37,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { mockWorkflowSteps, chartData } from "@/data/mockData";
-import { documentsApi } from "@/lib/api";
+import { documentsApi, simpleProcessingApi } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
 
@@ -61,6 +61,9 @@ interface DocumentStats {
 export default function Dashboard() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [stats, setStats] = useState<DocumentStats | null>(null);
+  const [documentStatuses, setDocumentStatuses] = useState<Record<string, any>>(
+    {}
+  );
   const [searchTerm, setSearchTerm] = useState("");
   const [activeTab, setActiveTab] = useState("uploaded");
   const [loading, setLoading] = useState(true);
@@ -77,6 +80,30 @@ export default function Dashboard() {
 
       if (docsResponse.status === "success" && docsResponse.data) {
         setDocuments(docsResponse.data.documents);
+
+        // Fetch status for each document to check if masked versions are available
+        const statusPromises = docsResponse.data.documents.map(
+          async (doc: Document) => {
+            try {
+              const statusResponse =
+                await simpleProcessingApi.getDocumentStatus(doc.id);
+              return { [doc.id]: statusResponse.data };
+            } catch (error) {
+              console.error(
+                `Failed to get status for document ${doc.id}:`,
+                error
+              );
+              return { [doc.id]: null };
+            }
+          }
+        );
+
+        const statusResults = await Promise.all(statusPromises);
+        const statusMap = statusResults.reduce(
+          (acc, curr) => ({ ...acc, ...curr }),
+          {}
+        );
+        setDocumentStatuses(statusMap);
       }
 
       if (statsResponse.status === "success" && statsResponse.data) {
@@ -112,6 +139,117 @@ export default function Dashboard() {
         variant: "destructive",
       });
     }
+  };
+
+  const handleDownload = async (
+    documentId: string,
+    documentName: string,
+    downloadType: "original" | "masked" = "original"
+  ) => {
+    try {
+      let blob;
+
+      if (downloadType === "masked") {
+        // Try multiple approaches for masked file download
+        console.log(`Attempting to download masked file for: ${documentId}`);
+
+        // Approach 1: Try MongoDB download
+        try {
+          console.log("Trying MongoDB download for masked file...");
+          blob = await simpleProcessingApi.downloadFromMongo(
+            documentId,
+            "masked"
+          );
+          console.log("MongoDB masked download successful");
+        } catch (mongoError) {
+          console.log("MongoDB masked download failed:", mongoError);
+
+          // Approach 2: Try local masked file download
+          try {
+            console.log("Trying local masked file download...");
+            blob = await simpleProcessingApi.downloadMaskedDocument(documentId);
+            console.log("Local masked download successful");
+          } catch (localError) {
+            console.log("Local masked download failed:", localError);
+            throw new Error(
+              "No masked version available. Please ensure the document has been processed through the PII masking workflow."
+            );
+          }
+        }
+      } else {
+        // Download original version
+        console.log(`Attempting to download original file for: ${documentId}`);
+
+        try {
+          console.log("Trying MongoDB download for original file...");
+          blob = await simpleProcessingApi.downloadFromMongo(
+            documentId,
+            "uploaded"
+          );
+          console.log("MongoDB original download successful");
+        } catch (mongoError) {
+          console.log("MongoDB original download failed:", mongoError);
+
+          // Fallback to regular documents API
+          try {
+            console.log("Trying regular documents API download...");
+            await documentsApi.downloadDocument(documentId, documentName);
+            toast({
+              title: "Download Started",
+              description: "Original document is being downloaded.",
+            });
+            return; // Early return since documentsApi.downloadDocument handles the download
+          } catch (docsApiError) {
+            console.log("Documents API download failed:", docsApiError);
+            throw new Error("Original document not available for download");
+          }
+        }
+      }
+
+      // Create download link if we have a blob
+      if (blob) {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download =
+          downloadType === "masked"
+            ? `${documentName}_masked.pdf`
+            : documentName;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+        toast({
+          title: "Download Started",
+          description: `${
+            downloadType === "masked" ? "Masked" : "Original"
+          } document is being downloaded.`,
+        });
+      }
+    } catch (error) {
+      console.error("Download error:", error);
+      toast({
+        title: "Download Failed",
+        description: `Failed to download ${downloadType} document: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const getDocumentStatus = (documentId: string) => {
+    return documentStatuses[documentId] || null;
+  };
+
+  const isMaskedVersionAvailable = (documentId: string) => {
+    const status = getDocumentStatus(documentId);
+    return (
+      status &&
+      (status.masking_completed ||
+        (status.mongo_files && status.mongo_files.has_masked))
+    );
   };
 
   const formatFileSize = (bytes: number) => {
@@ -173,7 +311,7 @@ export default function Dashboard() {
   };
 
   const documentCounts = getDocumentCountsByStatus();
-  const recentDocuments = filteredDocuments.slice(0, 6); // Show only 6 recent documents
+  const recentDocuments = filteredDocuments.slice(0, 6);
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -225,10 +363,10 @@ export default function Dashboard() {
               metric={{
                 id: "storage",
                 title: "Storage Used",
-                value: stats.total_size_mb.toFixed(1),
+                value: stats.total_size_mb.toFixed(1) + " KB",
                 change: 8.2,
                 trend: "up",
-                unit: "MB",
+                unit: "KB",
                 icon: "HardDrive",
               }}
               index={1}
@@ -254,7 +392,7 @@ export default function Dashboard() {
                   {stats
                     ? `${
                         stats.total_documents
-                      } total documents (${stats.total_size_mb.toFixed(1)} MB)`
+                      } total documents (${stats.total_size_mb.toFixed(1)} KB)`
                     : "Loading..."}
                 </p>
               </div>
@@ -362,11 +500,50 @@ export default function Dashboard() {
                               >
                                 {document.status}
                               </Badge>
+                              {isMaskedVersionAvailable(document.id) && (
+                                <Badge className="bg-blue-100 text-blue-800 text-xs">
+                                  Masked Available
+                                </Badge>
+                              )}
                             </div>
                           </div>
                         </div>
 
                         <div className="flex items-center space-x-2">
+                          {/* Quick download buttons */}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              handleDownload(
+                                document.id,
+                                document.name,
+                                "original"
+                              )
+                            }
+                            className="h-8"
+                          >
+                            <Download className="w-3 h-3 mr-1" />
+                            Original
+                          </Button>
+                          {isMaskedVersionAvailable(document.id) && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() =>
+                                handleDownload(
+                                  document.id,
+                                  document.name,
+                                  "masked"
+                                )
+                              }
+                              className="h-8 bg-blue-50 hover:bg-blue-100"
+                            >
+                              <Download className="w-3 h-3 mr-1" />
+                              Masked
+                            </Button>
+                          )}
+
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button
@@ -381,10 +558,6 @@ export default function Dashboard() {
                               <DropdownMenuItem>
                                 <Eye className="w-4 h-4 mr-2" />
                                 View Details
-                              </DropdownMenuItem>
-                              <DropdownMenuItem>
-                                <Download className="w-4 h-4 mr-2" />
-                                Download
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 className="text-red-600"

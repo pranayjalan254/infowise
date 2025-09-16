@@ -49,11 +49,11 @@ export function SimpleDocumentUpload({
     try {
       const filesArray = Array.from(files);
 
-      // Only support single PDF for hackathon prototype
+      // Only support single document for simple processing
       if (filesArray.length > 1) {
         toast({
           title: "Single file only",
-          description: "Please upload one PDF file at a time.",
+          description: "Please upload one document at a time.",
           variant: "destructive",
         });
         setIsUploading(false);
@@ -62,11 +62,18 @@ export function SimpleDocumentUpload({
 
       const file = filesArray[0];
 
-      // Check if it's a PDF
-      if (file.type !== "application/pdf") {
+      // Check supported file types
+      const supportedTypes = [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "text/plain",
+      ];
+
+      if (!supportedTypes.includes(file.type)) {
         toast({
           title: "Invalid file type",
-          description: "Only PDF files are supported.",
+          description:
+            "Only PDF, Word (.docx), and text (.txt) files are supported.",
           variant: "destructive",
         });
         setIsUploading(false);
@@ -176,8 +183,8 @@ export function SimpleDocumentUpload({
       >
         <h2 className="text-2xl font-semibold">Upload Document</h2>
         <p className="text-muted-foreground max-w-md mx-auto">
-          Upload your PDF document to begin PII detection and masking. Only PDF
-          files are supported for this prototype.
+          Upload your document to begin PII detection and masking. Supports PDF,
+          Word (.docx), and text (.txt) files.
         </p>
       </motion.div>
       {/* Upload Area */}
@@ -203,19 +210,19 @@ export function SimpleDocumentUpload({
           </div>
           <div>
             <p className="text-lg font-medium">
-              Drop your PDF here, or{" "}
+              Drop your document here, or{" "}
               <button className="text-blue-600 hover:underline">
                 browse files
               </button>
             </p>
             <p className="text-sm text-muted-foreground">
-              Supports: PDF (max 50MB)
+              Supports: PDF, Word (.docx), Text (.txt) - max 50MB
             </p>
           </div>
           <input
             type="file"
             className="absolute inset-0 opacity-0 cursor-pointer"
-            accept="application/pdf"
+            accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
             onChange={handleFileInput}
             disabled={isUploading}
           />
