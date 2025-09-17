@@ -1120,13 +1120,13 @@ def process_document_complete():
         try:
             # Step 2: Generate PII detection config with suggested strategies
             current_app.logger.info("Step 2: Generating PII detection configuration...")
-            config_result = processor.generate_config(document_id)
+            config_result = processor.generate_pii_config(document_id)
             
             current_app.logger.info(f"PII detection completed. Found {config_result['total_pii']} PII entities")
             
             # Step 3: Apply masking using suggested strategies (no manual intervention)
             current_app.logger.info("Step 3: Applying PII masking with suggested strategies...")
-            processor.apply_masking(document_id)
+            masking_result = processor.apply_masking(document_id)
             
             current_app.logger.info("PII masking completed successfully")
             
