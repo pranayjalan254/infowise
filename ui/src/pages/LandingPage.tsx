@@ -14,10 +14,15 @@ import {
   Mail,
   X,
   Search,
+  Code,
+  ExternalLink,
+  Copy,
+  BookOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useNavigate } from "react-router-dom";
 
 export default function LandingPage() {
@@ -118,21 +123,39 @@ export default function LandingPage() {
           <div className="hidden md:flex items-center space-x-8">
             <a
               href="#features"
-              className="text-foreground hover:text-primary transition-colors"
+              className="text-foreground hover:text-primary transition-colors cursor-pointer"
+              onClick={(e) => {
+                e.preventDefault();
+                document
+                  .getElementById("features")
+                  ?.scrollIntoView({ behavior: "smooth" });
+              }}
             >
               Features
             </a>
             <a
               href="#workflow"
-              className="text-foreground hover:text-primary transition-colors"
+              className="text-foreground hover:text-primary transition-colors cursor-pointer"
+              onClick={(e) => {
+                e.preventDefault();
+                document
+                  .getElementById("workflow")
+                  ?.scrollIntoView({ behavior: "smooth" });
+              }}
             >
               Workflow
             </a>
             <a
-              href="#about"
-              className="text-foreground hover:text-primary transition-colors"
+              href="#api-section"
+              className="text-foreground hover:text-primary transition-colors cursor-pointer"
+              onClick={(e) => {
+                e.preventDefault();
+                document
+                  .getElementById("api-section")
+                  ?.scrollIntoView({ behavior: "smooth" });
+              }}
             >
-              About
+              API
             </a>
           </div>
 
@@ -144,12 +167,17 @@ export default function LandingPage() {
             >
               Sign In
             </Button>
+
             <Button
-              onClick={() => navigate("/auth")}
               className="neumorphic-button bg-primary text-primary-foreground hover:bg-primary/90"
+              onClick={() =>
+                document
+                  .getElementById("demo-section")
+                  ?.scrollIntoView({ behavior: "smooth" })
+              }
             >
-              Get Started
-              <ArrowRight className="ml-2 h-4 w-4" />
+              View Demo
+              <Eye className="ml-2 h-5 w-5" />
             </Button>
           </div>
         </div>
@@ -195,13 +223,19 @@ export default function LandingPage() {
                 Get Started
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
+
               <Button
                 size="lg"
                 variant="outline"
-                className="neumorphic-button px-8 py-4 text-lg"
+                className="neumorphic-button px-8 py-4 text-lg bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900"
+                onClick={() =>
+                  document
+                    .getElementById("api-section")
+                    ?.scrollIntoView({ behavior: "smooth" })
+                }
               >
-                View Demo
-                <Eye className="ml-2 h-5 w-5" />
+                View API
+                <Code className="ml-2 h-5 w-5" />
               </Button>
             </motion.div>
           </div>
@@ -445,6 +479,301 @@ export default function LandingPage() {
               </CardContent>
             </Card>
           </motion.div>
+        </div>
+      </section>
+
+      {/* API Documentation Section */}
+      <section
+        id="api-section"
+        className="px-6 py-20 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30"
+      >
+        <div className="max-w-7xl mx-auto">
+          <motion.div
+            initial={{ y: 20, opacity: 0 }}
+            whileInView={{ y: 0, opacity: 1 }}
+            transition={{ duration: 0.6 }}
+            viewport={{ once: true }}
+            className="text-center mb-16 mt-5"
+          >
+            <h2 className="text-3xl md:text-4xl font-bold text-display text-foreground mb-6">
+              Integrate PII Protection
+            </h2>
+            <p className="text-xl text-muted-foreground max-w-3xl mx-auto mb-8">
+              Simple REST API for automatic PII detection and masking. Upload a
+              document, get back a masked version with all sensitive data
+              protected.
+            </p>
+          </motion.div>
+
+          <div className="grid lg:grid-cols-2 gap-12 items-start">
+            {/* API Overview */}
+            <motion.div
+              initial={{ x: -20, opacity: 0 }}
+              whileInView={{ x: 0, opacity: 1 }}
+              transition={{ duration: 0.6 }}
+              viewport={{ once: true }}
+            >
+              <Card className="neumorphic-card h-full">
+                <CardHeader>
+                  <CardTitle className="text-xl font-semibold flex items-center">
+                    <BookOpen className="h-5 w-5 mr-2 text-blue-600" />
+                    API Overview
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div>
+                    <h4 className="font-semibold text-foreground mb-2">
+                      Endpoint
+                    </h4>
+                    <div className="bg-gray-900 dark:bg-gray-800 p-3 rounded-lg font-mono text-sm">
+                      <span className="text-green-400">POST</span>{" "}
+                      <span className="text-white">
+                        /api/v1/simple/process-document
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="font-semibold text-foreground mb-2">
+                      Features
+                    </h4>
+                    <ul className="space-y-2 text-muted-foreground">
+                      <li className="flex items-start">
+                        <CheckCircle className="h-4 w-4 mr-2 text-green-500 mt-0.5 flex-shrink-0" />
+                        Automatic PII detection using LLM & BERT NER
+                      </li>
+                      <li className="flex items-start">
+                        <CheckCircle className="h-4 w-4 mr-2 text-green-500 mt-0.5 flex-shrink-0" />
+                        Intelligent masking strategies
+                      </li>
+                      <li className="flex items-start">
+                        <CheckCircle className="h-4 w-4 mr-2 text-green-500 mt-0.5 flex-shrink-0" />
+                        Support for PDF, DOCX, TXT files, CSVs, Images and more
+                      </li>
+
+                      <li className="flex items-start">
+                        <CheckCircle className="h-4 w-4 mr-2 text-green-500 mt-0.5 flex-shrink-0" />
+                        Does not store any data
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div>
+                    <h4 className="font-semibold text-foreground mb-2">
+                      Supported PII Types
+                    </h4>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        "Names",
+                        "Emails",
+                        "Phones",
+                        "SSN",
+                        "Credit Cards",
+                        "Addresses",
+                        "Organizations",
+                        "Dates",
+                      ].map((type) => (
+                        <Badge
+                          key={type}
+                          variant="secondary"
+                          className="text-xs"
+                        >
+                          {type}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="font-semibold text-foreground mb-2">
+                      Response Headers
+                    </h4>
+                    <div className="text-sm text-muted-foreground space-y-1">
+                      <div>
+                        <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded">
+                          X-PII-Count
+                        </code>
+                        : Number of PII entities masked
+                      </div>
+                      <div>
+                        <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded">
+                          X-Document-ID
+                        </code>
+                        : Unique processing identifier
+                      </div>
+                      <div>
+                        <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded">
+                          X-Processing-Status
+                        </code>
+                        : Operation status
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </motion.div>
+
+            {/* Code Examples with Tabs */}
+            <motion.div
+              initial={{ x: 20, opacity: 0 }}
+              whileInView={{ x: 0, opacity: 1 }}
+              transition={{ duration: 0.6, delay: 0.2 }}
+              viewport={{ once: true }}
+            >
+              <Card className="neumorphic-card">
+                <CardHeader>
+                  <CardTitle className="text-xl font-semibold">
+                    Code Examples
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Tabs defaultValue="curl" className="w-full">
+                    <TabsList className="grid w-full grid-cols-3">
+                      <TabsTrigger value="curl">cURL</TabsTrigger>
+                      <TabsTrigger value="javascript">JavaScript</TabsTrigger>
+                      <TabsTrigger value="python">Python</TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="curl" className="mt-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-semibold">cURL Command</h4>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            navigator.clipboard
+                              .writeText(`curl -X POST http://localhost:5000/api/v1/simple/process-document \\
+  -F "document=@your_document.pdf" \\
+  -o masked_document.pdf`);
+                          }}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="bg-gray-900 dark:bg-gray-800 p-4 rounded-lg overflow-x-auto">
+                        <pre className="text-sm text-gray-300">
+                          {`curl -X POST http://localhost:5000/api/v1/simple/process-document \\
+  -F "document=@your_document.pdf" \\
+  -o masked_document.pdf`}
+                        </pre>
+                      </div>
+                    </TabsContent>
+
+                    <TabsContent value="javascript" className="mt-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-semibold">JavaScript/Web</h4>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            navigator.clipboard
+                              .writeText(`const formData = new FormData();
+formData.append('document', fileInput.files[0]);
+
+fetch('/api/v1/simple/process-document', {
+  method: 'POST',
+  body: formData
+})
+.then(response => {
+  if (response.ok) {
+    const piiCount = response.headers.get('X-PII-Count');
+    console.log(\`Masked \${piiCount} PII entities\`);
+    return response.blob();
+  }
+  throw new Error('Processing failed');
+})
+.then(blob => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'masked_document.pdf';
+  a.click();
+});`);
+                          }}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="bg-gray-900 dark:bg-gray-800 p-4 rounded-lg overflow-x-auto">
+                        <pre className="text-sm text-gray-300">
+                          {`const formData = new FormData();
+formData.append('document', fileInput.files[0]);
+
+fetch('/api/v1/simple/process-document', {
+  method: 'POST',
+  body: formData
+})
+.then(response => {
+  if (response.ok) {
+    const piiCount = response.headers.get('X-PII-Count');
+    console.log(\`Masked \${piiCount} PII entities\`);
+    return response.blob();
+  }
+  throw new Error('Processing failed');
+})
+.then(blob => {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'masked_document.pdf';
+  a.click();
+});`}
+                        </pre>
+                      </div>
+                    </TabsContent>
+
+                    <TabsContent value="python" className="mt-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h4 className="font-semibold">Python</h4>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            navigator.clipboard.writeText(`import requests
+
+url = "http://localhost:5000/api/v1/simple/process-document"
+files = {"document": open("your_document.pdf", "rb")}
+
+response = requests.post(url, files=files)
+
+if response.status_code == 200:
+    pii_count = response.headers.get('X-PII-Count', '0')
+    print(f"Successfully masked {pii_count} PII entities")
+    
+    with open("masked_document.pdf", "wb") as f:
+        f.write(response.content)
+else:
+    print("Processing failed:", response.text)`);
+                          }}
+                        >
+                          <Copy className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="bg-gray-900 dark:bg-gray-800 p-4 rounded-lg overflow-x-auto">
+                        <pre className="text-sm text-gray-300">
+                          {`import requests
+
+url = "http://localhost:5000/api/v1/simple/process-document"
+files = {"document": open("your_document.pdf", "rb")}
+
+response = requests.post(url, files=files)
+
+if response.status_code == 200:
+    pii_count = response.headers.get('X-PII-Count', '0')
+    print(f"Successfully masked {pii_count} PII entities")
+    
+    with open("masked_document.pdf", "wb") as f:
+        f.write(response.content)
+else:
+    print("Processing failed:", response.text)`}
+                        </pre>
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </div>
         </div>
       </section>
 

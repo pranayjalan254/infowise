@@ -1068,3 +1068,143 @@ def force_cleanup_document_data(document_id: str):
     except Exception as e:
         current_app.logger.error(f"Force cleanup error: {str(e)}")
         return error_response('Force cleanup failed', 'INTERNAL_ERROR')
+
+
+# ============================================================================
+# SIMPLIFIED API ENDPOINTS FOR EXTERNAL USE
+# ============================================================================
+
+@simple_processing_bp.route('/process-document', methods=['POST'])
+def process_document_complete():
+    """
+    Simplified API endpoint that handles the complete PII detection and masking pipeline.
+    
+    This endpoint combines all the steps into one seamless process:
+    1. Upload document
+    2. Generate PII detection configuration with suggested strategies
+    3. Apply masking using suggested strategies
+    4. Return the masked document
+    
+    Supports: PDF, DOCX, TXT files
+    
+    Request:
+        - Multipart form data with 'document' file
+        
+    Response:
+        - Success: Returns the masked document as a file download
+        - Error: JSON with error details
+    
+    Usage Example:
+        curl -X POST http://localhost:5000/api/v1/simple/process-document \
+             -F "document=@your_document.pdf" \
+             -o masked_document.pdf
+    """
+    try:
+        # Validate request
+        if 'document' not in request.files:
+            return error_response('No document file provided', 'MISSING_FILE')
+        
+        file = request.files['document']
+        if file.filename == '':
+            return error_response('No file selected', 'NO_FILE_SELECTED')
+        
+        current_app.logger.info(f"Starting complete document processing for: {file.filename}")
+        
+        # Step 1: Upload document
+        current_app.logger.info("Step 1: Uploading document...")
+        upload_result = processor.upload_document(file)
+        document_id = upload_result['document_id']
+        
+        current_app.logger.info(f"Document uploaded with ID: {document_id}")
+        
+        try:
+            # Step 2: Generate PII detection config with suggested strategies
+            current_app.logger.info("Step 2: Generating PII detection configuration...")
+            config_result = processor.generate_config(document_id)
+            
+            current_app.logger.info(f"PII detection completed. Found {config_result['total_pii']} PII entities")
+            
+            # Step 3: Apply masking using suggested strategies (no manual intervention)
+            current_app.logger.info("Step 3: Applying PII masking with suggested strategies...")
+            processor.apply_masking(document_id)
+            
+            current_app.logger.info("PII masking completed successfully")
+            
+            # Step 4: Return the masked document
+            current_app.logger.info("Step 4: Preparing masked document for download...")
+            
+            # Find the masked document
+            supported_extensions = ['*.pdf', '*.docx', '*.txt']
+            masked_files = []
+            for ext in supported_extensions:
+                masked_files.extend(list(RESULTS_DIR.glob(f"{document_id}_masked.{ext.replace('*.', '')}")))
+            
+            if not masked_files:
+                raise ValueError("Masked document not found")
+            
+            masked_file = masked_files[0]
+            original_filename = upload_result.get('filename', 'document')
+            
+            # Create a meaningful filename for the masked document
+            name_parts = original_filename.rsplit('.', 1)
+            if len(name_parts) == 2:
+                masked_filename = f"{name_parts[0]}_masked.{name_parts[1]}"
+            else:
+                masked_filename = f"{original_filename}_masked.pdf"
+            
+            # Prepare response with metadata
+            response_headers = {
+                'X-Document-ID': document_id,
+                'X-PII-Count': str(config_result['total_pii']),
+                'X-Processing-Status': 'completed',
+                'X-Original-Filename': original_filename
+            }
+            
+            # Create the file response
+            response = send_file(
+                masked_file,
+                as_attachment=True,
+                download_name=masked_filename,
+                mimetype='application/octet-stream'
+            )
+            
+            # Add custom headers
+            for header, value in response_headers.items():
+                response.headers[header] = value
+            
+            # Automatically cleanup intermediate files after successful processing
+            try:
+                # Keep only the final masked document, clean up intermediate files
+                current_app.logger.info(f"Auto-cleanup: Removing intermediate files for document {document_id}")
+                # Clean up uploads and configs, but keep the result
+                upload_files = list(UPLOADS_DIR.glob(f"{document_id}_*"))
+                config_files = list(CONFIGS_DIR.glob(f"{document_id}_*"))
+                
+                for file_to_remove in upload_files + config_files:
+                    try:
+                        file_to_remove.unlink()
+                        current_app.logger.debug(f"Removed intermediate file: {file_to_remove}")
+                    except Exception as e:
+                        current_app.logger.warning(f"Failed to remove {file_to_remove}: {e}")
+                        
+            except Exception as cleanup_error:
+                current_app.logger.warning(f"Auto-cleanup warning for {document_id}: {cleanup_error}")
+            
+            current_app.logger.info(f"Complete document processing finished successfully for document {document_id}")
+            return response
+            
+        except Exception as processing_error:
+            # If any step fails, clean up the uploaded document
+            current_app.logger.error(f"Processing failed for document {document_id}: {processing_error}")
+            try:
+                processor.cleanup_processing_data(document_id)
+            except:
+                pass  # Ignore cleanup errors during error handling
+            raise processing_error
+            
+    except ValueError as e:
+        return error_response(str(e), 'PROCESSING_ERROR')
+    except Exception as e:
+        current_app.logger.error(f"Complete document processing error: {str(e)}")
+        return error_response('Document processing failed', 'INTERNAL_ERROR')
+

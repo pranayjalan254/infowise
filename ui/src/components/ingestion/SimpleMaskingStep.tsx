@@ -16,7 +16,7 @@ import {
   Shield,
   Tag,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -149,8 +149,10 @@ export function SimpleMaskingStep({
   const [maskingResults, setMaskingResults] = useState<any>(null);
   const [showPreview, setShowPreview] = useState(true);
   const [activeTab, setActiveTab] = useState("person");
+  const [cleanupCompleted, setCleanupCompleted] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
 
   // Group PII items by category
   const categorizedPII = React.useMemo(() => {
@@ -201,6 +203,45 @@ export function SimpleMaskingStep({
       }
     }
   }, [detectedPIIData]);
+
+  // Cleanup effect - ensures input data is removed when user navigates away
+  useEffect(() => {
+    const performCleanup = async () => {
+      if (cleanupCompleted || !detectedPIIData?.document_id) return;
+      setCleanupCompleted(true);
+
+      try {
+        console.log("Performing cleanup on component unmount/navigation");
+        await simpleProcessingApi.cleanupProcessingData(
+          detectedPIIData.document_id
+        );
+        console.log("Cleanup completed successfully");
+      } catch (error) {
+        console.error("Cleanup error during navigation:", error);
+      }
+    };
+
+    // Handle browser navigation/refresh
+    const handleBeforeUnload = () => {
+      performCleanup();
+    };
+
+    // Handle browser back/forward buttons
+    const handlePopState = () => {
+      performCleanup();
+    };
+
+    // Add event listeners
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("popstate", handlePopState);
+
+    // Cleanup function for component unmount
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("popstate", handlePopState);
+      performCleanup();
+    };
+  }, [detectedPIIData?.document_id, cleanupCompleted]);
 
   const handleStrategyChange = (itemId: string, strategy: string) => {
     setConfigData((prev) =>
@@ -469,7 +510,16 @@ export function SimpleMaskingStep({
   };
 
   const handleReturnToDashboard = async () => {
+    // Check if cleanup already completed
+    if (cleanupCompleted) {
+      navigate("/dashboard");
+      return;
+    }
+
     try {
+      // Mark cleanup as completed to prevent duplicate calls
+      setCleanupCompleted(true);
+
       // Call cleanup endpoint to remove input data and config files
       const cleanupResponse = await simpleProcessingApi.cleanupProcessingData(
         detectedPIIData.document_id
