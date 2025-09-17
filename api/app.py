@@ -64,18 +64,6 @@ def register_blueprints(app: Flask) -> None:
     from services.documents import documents_bp
     app.register_blueprint(documents_bp, url_prefix='/api/v1/documents')
     
-    # PII detection
-    from services.pii_detection import pii_detection_bp
-    app.register_blueprint(pii_detection_bp, url_prefix='/api/v1/pii')
-    
-    # PII detection streaming
-    from services.pii_detection_streaming import pii_streaming_bp
-    app.register_blueprint(pii_streaming_bp, url_prefix='/api/v1/pii')
-    
-    # PII masking
-    from services.pii_masking import pii_masking_bp
-    app.register_blueprint(pii_masking_bp, url_prefix='/api/v1/masking')
-    
     # Synthetic data generation
     from services.synthetic_data import synthetic_data_bp
     app.register_blueprint(synthetic_data_bp, url_prefix='/api/v1/synthetic')

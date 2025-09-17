@@ -431,6 +431,94 @@ class MongoDatabase:
             current_app.logger.error(f"File data retrieval error: {str(e)}")
             return None
 
+    def cleanup_input_documents(self, document_id: str) -> bool:
+        """
+        Remove input documents (status='uploaded') for a given document_id.
+        Only keeps masked documents (status='masked').
+        
+        Args:
+            document_id: Document ID to cleanup
+            
+        Returns:
+            True if cleanup was successful, False otherwise
+        """
+        if self._fs is None or self._documents_collection is None:
+            raise RuntimeError("MongoDB not properly initialized")
+            
+        try:
+            # Find all input documents for this document_id
+            query = {
+                'metadata.document_id': document_id,
+                'status': 'uploaded'
+            }
+            
+            documents = self._documents_collection.find(query)
+            deleted_count = 0
+            
+            for document in documents:
+                try:
+                    # Delete file from GridFS
+                    self._fs.delete(document['file_id'])
+                    current_app.logger.info(f"Deleted GridFS file: {document['file_id']}")
+                except gridfs.errors.NoFile:
+                    current_app.logger.warning(f"GridFS file not found for deletion: {document['file_id']}")
+                
+                # Delete document metadata
+                result = self._documents_collection.delete_one({'_id': document['_id']})
+                if result.deleted_count > 0:
+                    deleted_count += 1
+                    current_app.logger.info(f"Deleted input document metadata: {document['_id']}")
+            
+            current_app.logger.info(f"Cleaned up {deleted_count} input documents for document_id: {document_id}")
+            return True
+            
+        except Exception as e:
+            current_app.logger.error(f"Input document cleanup error: {str(e)}")
+            return False
+
+    def delete_documents_by_document_id(self, document_id: str, status: str = None) -> int:
+        """
+        Delete all documents (and their GridFS files) matching a document_id.
+        
+        Args:
+            document_id: Document ID to delete
+            status: Optional status filter ('uploaded', 'masked', etc.)
+            
+        Returns:
+            Number of documents deleted
+        """
+        if self._fs is None or self._documents_collection is None:
+            raise RuntimeError("MongoDB not properly initialized")
+            
+        try:
+            # Build query
+            query = {'metadata.document_id': document_id}
+            if status:
+                query['status'] = status
+            
+            documents = self._documents_collection.find(query)
+            deleted_count = 0
+            
+            for document in documents:
+                try:
+                    # Delete file from GridFS
+                    self._fs.delete(document['file_id'])
+                    current_app.logger.info(f"Deleted GridFS file: {document['file_id']}")
+                except gridfs.errors.NoFile:
+                    current_app.logger.warning(f"GridFS file not found for deletion: {document['file_id']}")
+                
+                # Delete document metadata
+                result = self._documents_collection.delete_one({'_id': document['_id']})
+                if result.deleted_count > 0:
+                    deleted_count += 1
+                    current_app.logger.info(f"Deleted document metadata: {document['_id']}")
+            
+            return deleted_count
+            
+        except Exception as e:
+            current_app.logger.error(f"Document deletion by document_id error: {str(e)}")
+            return 0
+
 
 # Global MongoDB instance
 mongo_db = MongoDatabase()

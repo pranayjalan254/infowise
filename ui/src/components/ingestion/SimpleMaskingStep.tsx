@@ -468,6 +468,36 @@ export function SimpleMaskingStep({
     }
   };
 
+  const handleReturnToDashboard = async () => {
+    try {
+      // Call cleanup endpoint to remove input data and config files
+      const cleanupResponse = await simpleProcessingApi.cleanupProcessingData(
+        detectedPIIData.document_id
+      );
+
+      console.log("Cleanup completed:", cleanupResponse);
+
+      // Show success message
+      toast({
+        title: "Processing Complete",
+        description:
+          "Input data has been securely removed. Only masked data is retained.",
+      });
+    } catch (error) {
+      console.error("Cleanup error:", error);
+      // Still navigate but show warning
+      toast({
+        title: "Warning",
+        description:
+          "There was an issue cleaning up temporary files. Please contact support if this persists.",
+        variant: "destructive",
+      });
+    } finally {
+      // Always navigate to dashboard regardless of cleanup result
+      navigate("/dashboard");
+    }
+  };
+
   const getSeverityColor = (severity: string) => {
     switch (severity) {
       case "high":
@@ -694,9 +724,7 @@ export function SimpleMaskingStep({
                     Download Again
                   </Button>
                   <Button
-                    onClick={() => {
-                      navigate("/dashboard");
-                    }}
+                    onClick={handleReturnToDashboard}
                     size="lg"
                     className="bg-blue-600 hover:bg-blue-700"
                   >

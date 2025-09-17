@@ -447,6 +447,232 @@ class SimpleDocumentProcessor:
         except Exception as e:
             raise ValueError(f"Failed to retrieve document info: {str(e)}")
 
+    def cleanup_processing_data(self, document_id: str) -> Dict[str, Any]:
+        """
+        Clean up all processing data for a document after masking is complete.
+        This removes:
+        1. Input documents from MongoDB (status='uploaded')
+        2. Input files from local storage
+        3. Config files from local storage
+        
+        Keeps:
+        1. Masked documents in MongoDB (status='masked')
+        2. Masked files in local storage (for redundancy)
+        
+        Args:
+            document_id: Document ID to clean up
+            
+        Returns:
+            Dictionary with cleanup results
+        """
+        try:
+            cleanup_results = {
+                'document_id': document_id,
+                'mongodb_input_deleted': 0,
+                'local_input_files_deleted': [],
+                'config_files_deleted': [],
+                'errors': []
+            }
+            
+            # 1. Remove input documents from MongoDB (keep masked ones)
+            try:
+                deleted_count = mongo_db.delete_documents_by_document_id(document_id, status='uploaded')
+                cleanup_results['mongodb_input_deleted'] = deleted_count
+                current_app.logger.info(f"Deleted {deleted_count} input documents from MongoDB for document_id: {document_id}")
+            except Exception as e:
+                error_msg = f"Failed to delete MongoDB input documents: {str(e)}"
+                cleanup_results['errors'].append(error_msg)
+                current_app.logger.error(error_msg)
+            
+            # 2. Remove input files from local storage
+            try:
+                supported_extensions = ['*.pdf', '*.docx', '*.txt']
+                for ext in supported_extensions:
+                    input_files = list(UPLOADS_DIR.glob(f"{document_id}_{ext}"))
+                    for file_path in input_files:
+                        try:
+                            file_path.unlink()  # Delete the file
+                            cleanup_results['local_input_files_deleted'].append(str(file_path))
+                            current_app.logger.info(f"Deleted local input file: {file_path}")
+                        except Exception as e:
+                            error_msg = f"Failed to delete local file {file_path}: {str(e)}"
+                            cleanup_results['errors'].append(error_msg)
+                            current_app.logger.error(error_msg)
+                            
+                # Also remove any converted temporary files
+                temp_files = list(UPLOADS_DIR.glob(f"{document_id}_converted.pdf"))
+                for file_path in temp_files:
+                    try:
+                        file_path.unlink()
+                        cleanup_results['local_input_files_deleted'].append(str(file_path))
+                        current_app.logger.info(f"Deleted temporary converted file: {file_path}")
+                    except Exception as e:
+                        error_msg = f"Failed to delete temp file {file_path}: {str(e)}"
+                        cleanup_results['errors'].append(error_msg)
+                        current_app.logger.error(error_msg)
+                        
+            except Exception as e:
+                error_msg = f"Error during local file cleanup: {str(e)}"
+                cleanup_results['errors'].append(error_msg)
+                current_app.logger.error(error_msg)
+            
+            # 3. Remove config files from local storage
+            try:
+                config_patterns = [
+                    f"{document_id}_pii_config.txt",
+                    f"{document_id}_pii_config_detection_report.txt"
+                ]
+                
+                for pattern in config_patterns:
+                    config_files = list(CONFIGS_DIR.glob(pattern))
+                    for file_path in config_files:
+                        try:
+                            file_path.unlink()
+                            cleanup_results['config_files_deleted'].append(str(file_path))
+                            current_app.logger.info(f"Deleted config file: {file_path}")
+                        except Exception as e:
+                            error_msg = f"Failed to delete config file {file_path}: {str(e)}"
+                            cleanup_results['errors'].append(error_msg)
+                            current_app.logger.error(error_msg)
+                            
+            except Exception as e:
+                error_msg = f"Error during config file cleanup: {str(e)}"
+                cleanup_results['errors'].append(error_msg)
+                current_app.logger.error(error_msg)
+            
+            # Log summary
+            total_deleted = (cleanup_results['mongodb_input_deleted'] + 
+                           len(cleanup_results['local_input_files_deleted']) + 
+                           len(cleanup_results['config_files_deleted']))
+            
+            current_app.logger.info(f"Cleanup summary for {document_id}: "
+                                  f"MongoDB: {cleanup_results['mongodb_input_deleted']}, "
+                                  f"Local files: {len(cleanup_results['local_input_files_deleted'])}, "
+                                  f"Config files: {len(cleanup_results['config_files_deleted'])}, "
+                                  f"Errors: {len(cleanup_results['errors'])}")
+            
+            return cleanup_results
+            
+        except Exception as e:
+            raise ValueError(f"Cleanup failed: {str(e)}")
+
+    def force_cleanup_all_processing_data(self, document_id: str) -> Dict[str, Any]:
+        """
+        Force cleanup of ALL data related to a document (including masked data).
+        This is for complete removal when needed.
+        
+        Args:
+            document_id: Document ID to completely clean up
+            
+        Returns:
+            Dictionary with cleanup results
+        """
+        try:
+            cleanup_results = {
+                'document_id': document_id,
+                'mongodb_all_deleted': 0,
+                'local_files_deleted': [],
+                'config_files_deleted': [],
+                'results_deleted': [],
+                'errors': []
+            }
+            
+            # 1. Remove ALL documents from MongoDB (both uploaded and masked)
+            try:
+                deleted_count = mongo_db.delete_documents_by_document_id(document_id)  # No status filter
+                cleanup_results['mongodb_all_deleted'] = deleted_count
+                current_app.logger.info(f"Deleted {deleted_count} documents from MongoDB for document_id: {document_id}")
+            except Exception as e:
+                error_msg = f"Failed to delete MongoDB documents: {str(e)}"
+                cleanup_results['errors'].append(error_msg)
+                current_app.logger.error(error_msg)
+            
+            # 2. Remove all local files
+            try:
+                # Input files
+                supported_extensions = ['*.pdf', '*.docx', '*.txt']
+                for ext in supported_extensions:
+                    files = list(UPLOADS_DIR.glob(f"{document_id}_{ext}"))
+                    for file_path in files:
+                        try:
+                            file_path.unlink()
+                            cleanup_results['local_files_deleted'].append(str(file_path))
+                            current_app.logger.info(f"Deleted local file: {file_path}")
+                        except Exception as e:
+                            error_msg = f"Failed to delete file {file_path}: {str(e)}"
+                            cleanup_results['errors'].append(error_msg)
+                            current_app.logger.error(error_msg)
+                
+                # Temp files
+                temp_files = list(UPLOADS_DIR.glob(f"{document_id}_converted.pdf"))
+                for file_path in temp_files:
+                    try:
+                        file_path.unlink()
+                        cleanup_results['local_files_deleted'].append(str(file_path))
+                        current_app.logger.info(f"Deleted temp file: {file_path}")
+                    except Exception as e:
+                        error_msg = f"Failed to delete temp file {file_path}: {str(e)}"
+                        cleanup_results['errors'].append(error_msg)
+                        current_app.logger.error(error_msg)
+                        
+            except Exception as e:
+                error_msg = f"Error during local file cleanup: {str(e)}"
+                cleanup_results['errors'].append(error_msg)
+                current_app.logger.error(error_msg)
+            
+            # 3. Remove config files
+            try:
+                config_patterns = [
+                    f"{document_id}_pii_config.txt",
+                    f"{document_id}_pii_config_detection_report.txt"
+                ]
+                
+                for pattern in config_patterns:
+                    config_files = list(CONFIGS_DIR.glob(pattern))
+                    for file_path in config_files:
+                        try:
+                            file_path.unlink()
+                            cleanup_results['config_files_deleted'].append(str(file_path))
+                            current_app.logger.info(f"Deleted config file: {file_path}")
+                        except Exception as e:
+                            error_msg = f"Failed to delete config file {file_path}: {str(e)}"
+                            cleanup_results['errors'].append(error_msg)
+                            current_app.logger.error(error_msg)
+                            
+            except Exception as e:
+                error_msg = f"Error during config file cleanup: {str(e)}"
+                cleanup_results['errors'].append(error_msg)
+                current_app.logger.error(error_msg)
+            
+            # 4. Remove result files
+            try:
+                result_patterns = [
+                    f"{document_id}_masked.pdf",
+                    f"{document_id}_masked_masking_report.txt"
+                ]
+                
+                for pattern in result_patterns:
+                    result_files = list(RESULTS_DIR.glob(pattern))
+                    for file_path in result_files:
+                        try:
+                            file_path.unlink()
+                            cleanup_results['results_deleted'].append(str(file_path))
+                            current_app.logger.info(f"Deleted result file: {file_path}")
+                        except Exception as e:
+                            error_msg = f"Failed to delete result file {file_path}: {str(e)}"
+                            cleanup_results['errors'].append(error_msg)
+                            current_app.logger.error(error_msg)
+                            
+            except Exception as e:
+                error_msg = f"Error during result file cleanup: {str(e)}"
+                cleanup_results['errors'].append(error_msg)
+                current_app.logger.error(error_msg)
+            
+            return cleanup_results
+            
+        except Exception as e:
+            raise ValueError(f"Force cleanup failed: {str(e)}")
+
 
 # Initialize processor
 processor = SimpleDocumentProcessor()
@@ -796,3 +1022,49 @@ def debug_mongo_all():
     except Exception as e:
         current_app.logger.error(f"Debug MongoDB error: {str(e)}")
         return error_response('Debug failed', 'INTERNAL_ERROR')
+
+
+@simple_processing_bp.route('/cleanup/<document_id>', methods=['POST'])
+def cleanup_document_data(document_id: str):
+    """
+    Clean up input data and config files after masking is complete.
+    Removes input documents from MongoDB and local storage, keeps masked data.
+    """
+    try:
+        result = processor.cleanup_processing_data(document_id)
+        
+        # Check if there were any errors
+        if result['errors']:
+            current_app.logger.warning(f"Cleanup completed with errors for {document_id}: {result['errors']}")
+            return success_response(result, message="Cleanup completed with some errors")
+        else:
+            return success_response(result, message="Cleanup completed successfully")
+        
+    except ValueError as e:
+        return error_response(str(e), 'CLEANUP_ERROR')
+    except Exception as e:
+        current_app.logger.error(f"Cleanup error: {str(e)}")
+        return error_response('Cleanup failed', 'INTERNAL_ERROR')
+
+
+@simple_processing_bp.route('/cleanup/<document_id>/force', methods=['POST'])
+def force_cleanup_document_data(document_id: str):
+    """
+    Force cleanup of ALL data related to a document (including masked data).
+    This removes everything - use with caution.
+    """
+    try:
+        result = processor.force_cleanup_all_processing_data(document_id)
+        
+        # Check if there were any errors
+        if result['errors']:
+            current_app.logger.warning(f"Force cleanup completed with errors for {document_id}: {result['errors']}")
+            return success_response(result, message="Force cleanup completed with some errors")
+        else:
+            return success_response(result, message="Force cleanup completed successfully")
+        
+    except ValueError as e:
+        return error_response(str(e), 'CLEANUP_ERROR')
+    except Exception as e:
+        current_app.logger.error(f"Force cleanup error: {str(e)}")
+        return error_response('Force cleanup failed', 'INTERNAL_ERROR')

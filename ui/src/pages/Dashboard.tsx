@@ -14,28 +14,12 @@ import {
   LineChart,
   Line,
 } from "recharts";
-import {
-  FileText,
-  Upload,
-  MoreVertical,
-  Eye,
-  Download,
-  Trash2,
-  Search,
-} from "lucide-react";
+import { FileText, Upload, Download, Trash2, Search } from "lucide-react";
 import { MetricCard } from "@/components/ui/metric-card";
 import { WorkflowTracker } from "@/components/ui/workflow-tracker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { mockWorkflowSteps, chartData } from "@/data/mockData";
 import { documentsApi, simpleProcessingApi } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -65,7 +49,6 @@ export default function Dashboard() {
     {}
   );
   const [searchTerm, setSearchTerm] = useState("");
-  const [activeTab, setActiveTab] = useState("uploaded");
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -144,65 +127,31 @@ export default function Dashboard() {
   const handleDownload = async (
     documentId: string,
     documentName: string,
-    downloadType: "original" | "masked" = "original"
+    downloadType: "masked"
   ) => {
     try {
       let blob;
 
-      if (downloadType === "masked") {
-        // Try multiple approaches for masked file download
-        console.log(`Attempting to download masked file for: ${documentId}`);
+      try {
+        console.log("Trying MongoDB download for masked file...");
+        blob = await simpleProcessingApi.downloadFromMongo(
+          documentId,
+          "masked"
+        );
+        console.log("MongoDB masked download successful");
+      } catch (mongoError) {
+        console.log("MongoDB masked download failed:", mongoError);
 
-        // Approach 1: Try MongoDB download
+        // Approach 2: Try local masked file download
         try {
-          console.log("Trying MongoDB download for masked file...");
-          blob = await simpleProcessingApi.downloadFromMongo(
-            documentId,
-            "masked"
+          console.log("Trying local masked file download...");
+          blob = await simpleProcessingApi.downloadMaskedDocument(documentId);
+          console.log("Local masked download successful");
+        } catch (localError) {
+          console.log("Local masked download failed:", localError);
+          throw new Error(
+            "No masked version available. Please ensure the document has been processed through the PII masking workflow."
           );
-          console.log("MongoDB masked download successful");
-        } catch (mongoError) {
-          console.log("MongoDB masked download failed:", mongoError);
-
-          // Approach 2: Try local masked file download
-          try {
-            console.log("Trying local masked file download...");
-            blob = await simpleProcessingApi.downloadMaskedDocument(documentId);
-            console.log("Local masked download successful");
-          } catch (localError) {
-            console.log("Local masked download failed:", localError);
-            throw new Error(
-              "No masked version available. Please ensure the document has been processed through the PII masking workflow."
-            );
-          }
-        }
-      } else {
-        // Download original version
-        console.log(`Attempting to download original file for: ${documentId}`);
-
-        try {
-          console.log("Trying MongoDB download for original file...");
-          blob = await simpleProcessingApi.downloadFromMongo(
-            documentId,
-            "uploaded"
-          );
-          console.log("MongoDB original download successful");
-        } catch (mongoError) {
-          console.log("MongoDB original download failed:", mongoError);
-
-          // Fallback to regular documents API
-          try {
-            console.log("Trying regular documents API download...");
-            await documentsApi.downloadDocument(documentId, documentName);
-            toast({
-              title: "Download Started",
-              description: "Original document is being downloaded.",
-            });
-            return; // Early return since documentsApi.downloadDocument handles the download
-          } catch (docsApiError) {
-            console.log("Documents API download failed:", docsApiError);
-            throw new Error("Original document not available for download");
-          }
         }
       }
 
@@ -243,15 +192,6 @@ export default function Dashboard() {
     return documentStatuses[documentId] || null;
   };
 
-  const isMaskedVersionAvailable = (documentId: string) => {
-    const status = getDocumentStatus(documentId);
-    return (
-      status &&
-      (status.masking_completed ||
-        (status.mongo_files && status.mongo_files.has_masked))
-    );
-  };
-
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return "0 Bytes";
     const k = 1024;
@@ -288,29 +228,10 @@ export default function Dashboard() {
     const matchesSearch = doc.name
       .toLowerCase()
       .includes(searchTerm.toLowerCase());
-    const matchesTab = doc.status.toLowerCase() === activeTab.toLowerCase();
+    const matchesTab = doc.status.toLowerCase() === "masked";
     return matchesSearch && matchesTab;
   });
 
-  // Get document counts by status
-  const getDocumentCountsByStatus = () => {
-    const counts = {
-      uploaded: 0,
-      masked: 0,
-      failed: 0,
-    };
-
-    documents.forEach((doc) => {
-      const status = doc.status.toLowerCase();
-      if (status === "uploaded") counts.uploaded++;
-      else if (status === "masked") counts.masked++;
-      else if (status === "failed") counts.failed++;
-    });
-
-    return counts;
-  };
-
-  const documentCounts = getDocumentCountsByStatus();
   const recentDocuments = filteredDocuments.slice(0, 6);
   return (
     <div className="space-y-6">
@@ -386,7 +307,7 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle className="text-xl font-semibold text-foreground">
-                  Recent Documents
+                  Recent Masked Documents
                 </CardTitle>
                 <p className="text-sm text-muted-foreground mt-1">
                   {stats
@@ -418,24 +339,8 @@ export default function Dashboard() {
           </CardHeader>
 
           <CardContent>
-            <Tabs
-              value={activeTab}
-              onValueChange={setActiveTab}
-              className="w-full"
-            >
-              <TabsList className="grid grid-cols-5 w-full mb-6">
-                <TabsTrigger value="uploaded" className="text-sm">
-                  Uploaded ({documentCounts.uploaded})
-                </TabsTrigger>
-                <TabsTrigger value="masked" className="text-sm">
-                  Masked ({documentCounts.masked})
-                </TabsTrigger>
-                <TabsTrigger value="failed" className="text-sm">
-                  Failed ({documentCounts.failed})
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value={activeTab} className="mt-0">
+            <div className="w-full">
+              <div className="mt-0">
                 {loading ? (
                   <div className="flex items-center justify-center h-32">
                     <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
@@ -443,13 +348,7 @@ export default function Dashboard() {
                 ) : recentDocuments.length === 0 ? (
                   <div className="text-center py-12">
                     <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                    <h3 className="text-lg font-medium text-foreground mb-2">
-                      {documents.length === 0
-                        ? "No documents uploaded"
-                        : activeTab === "all"
-                        ? "No documents found"
-                        : `No ${activeTab} documents found`}
-                    </h3>
+
                     <p className="text-muted-foreground mb-4">
                       {documents.length === 0
                         ? "Upload your first document to get started"
@@ -493,24 +392,11 @@ export default function Dashboard() {
                               <span className="text-xs text-muted-foreground">
                                 {formatDate(document.upload_date)}
                               </span>
-                              <Badge
-                                className={`${getStatusColor(
-                                  document.status
-                                )} text-xs`}
-                              >
-                                {document.status}
-                              </Badge>
-                              {isMaskedVersionAvailable(document.id) && (
-                                <Badge className="bg-blue-100 text-blue-800 text-xs">
-                                  Masked Available
-                                </Badge>
-                              )}
                             </div>
                           </div>
                         </div>
 
                         <div className="flex items-center space-x-2">
-                          {/* Quick download buttons */}
                           <Button
                             variant="outline"
                             size="sm"
@@ -518,58 +404,21 @@ export default function Dashboard() {
                               handleDownload(
                                 document.id,
                                 document.name,
-                                "original"
+                                "masked"
                               )
                             }
-                            className="h-8"
+                            className="h-10 w-12 bg-blue-50 "
                           >
-                            <Download className="w-3 h-3 mr-1" />
-                            Original
+                            <Download className="w-4 h-4" />
                           </Button>
-                          {isMaskedVersionAvailable(document.id) && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() =>
-                                handleDownload(
-                                  document.id,
-                                  document.name,
-                                  "masked"
-                                )
-                              }
-                              className="h-8 bg-blue-50 hover:bg-blue-100"
-                            >
-                              <Download className="w-3 h-3 mr-1" />
-                              Masked
-                            </Button>
-                          )}
-
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 p-0"
-                              >
-                                <MoreVertical className="w-4 h-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem>
-                                <Eye className="w-4 h-4 mr-2" />
-                                View Details
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                className="text-red-600"
-                                onClick={() =>
-                                  handleDelete(document.id, document.name)
-                                }
-                              >
-                                <Trash2 className="w-4 h-4 mr-2" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                          <Button
+                            className=""
+                            onClick={() =>
+                              handleDelete(document.id, document.name)
+                            }
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
                         </div>
                       </motion.div>
                     ))}
@@ -587,8 +436,8 @@ export default function Dashboard() {
                     )}
                   </div>
                 )}
-              </TabsContent>
-            </Tabs>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </motion.div>

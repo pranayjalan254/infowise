@@ -827,6 +827,29 @@ export const simpleProcessingApi = {
       return data;
     });
   },
+
+  // Cleanup endpoints
+  cleanupProcessingData: (documentId: string) =>
+    fetch(`${API_BASE_URL}/simple/cleanup/${documentId}`, {
+      method: "POST",
+    }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error?.message || "Cleanup failed");
+      }
+      return data;
+    }),
+
+  forceCleanupAllData: (documentId: string) =>
+    fetch(`${API_BASE_URL}/simple/cleanup/${documentId}/force`, {
+      method: "POST",
+    }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error?.message || "Force cleanup failed");
+      }
+      return data;
+    }),
 };
 
 // Query client for React Query
