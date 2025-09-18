@@ -50,6 +50,8 @@ interface SimpleMaskingStepProps {
     config_data: PIIItem[];
   };
   onMaskingComplete: (results: any) => void;
+  showApplyButton?: boolean;
+  maskingResults?: any; // External masking results from bulk processing
 }
 
 const maskingStrategies = [
@@ -141,11 +143,14 @@ const getCategoryForPIIType = (type: string): string => {
 export function SimpleMaskingStep({
   detectedPIIData,
   onMaskingComplete,
+  showApplyButton = true,
+  maskingResults: externalMaskingResults,
 }: SimpleMaskingStepProps) {
   const [configData, setConfigData] = useState<PIIItem[]>([]);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [isApplyingMasking, setIsApplyingMasking] = useState(false);
   const [maskingProgress, setMaskingProgress] = useState(0);
+  const [maskingStatus, setMaskingStatus] = useState<string>("");
   const [maskingResults, setMaskingResults] = useState<any>(null);
   const [showPreview, setShowPreview] = useState(true);
   const [activeTab, setActiveTab] = useState("person");
@@ -153,6 +158,13 @@ export function SimpleMaskingStep({
   const { toast } = useToast();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Use external masking results if provided (bulk mode)
+  useEffect(() => {
+    if (externalMaskingResults) {
+      setMaskingResults(externalMaskingResults);
+    }
+  }, [externalMaskingResults]);
 
   // Group PII items by category
   const categorizedPII = React.useMemo(() => {
@@ -205,13 +217,19 @@ export function SimpleMaskingStep({
   }, [detectedPIIData]);
 
   // Cleanup effect - ensures input data is removed when user navigates away
+  // NOTE: Only cleanup in single-file mode, not in bulk mode
   useEffect(() => {
+    // Skip cleanup in bulk mode (when showApplyButton is false)
+    if (!showApplyButton) {
+      return;
+    }
+
     const performCleanup = async () => {
       if (cleanupCompleted || !detectedPIIData?.document_id) return;
       setCleanupCompleted(true);
 
       try {
-        console.log("Performing cleanup on component unmount/navigation");
+        console.log("Performing cleanup on browser navigation/refresh");
         await simpleProcessingApi.cleanupProcessingData(
           detectedPIIData.document_id
         );
@@ -235,13 +253,13 @@ export function SimpleMaskingStep({
     window.addEventListener("beforeunload", handleBeforeUnload);
     window.addEventListener("popstate", handlePopState);
 
-    // Cleanup function for component unmount
+    // Cleanup function - only on actual component unmount (browser navigation)
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
       window.removeEventListener("popstate", handlePopState);
-      performCleanup();
+      // Don't cleanup on normal workflow transitions, only on browser navigation
     };
-  }, [detectedPIIData?.document_id, cleanupCompleted]);
+  }, [detectedPIIData?.document_id, cleanupCompleted, showApplyButton]);
 
   const handleStrategyChange = (itemId: string, strategy: string) => {
     setConfigData((prev) =>
@@ -401,6 +419,7 @@ export function SimpleMaskingStep({
 
     setIsApplyingMasking(true);
     setMaskingProgress(0);
+    setMaskingStatus("Preparing masking configuration...");
 
     try {
       // Filter only selected items and prepare config data
@@ -408,16 +427,24 @@ export function SimpleMaskingStep({
         selectedItems.has(item.id)
       );
 
+      setMaskingStatus("Updating server configuration...");
+      setMaskingProgress(20);
+
       // Update configuration on server
       await simpleProcessingApi.updateConfig(
         detectedPIIData.document_id,
         selectedConfigData
       );
 
-      // Simulate progress for better UX
-      const progressInterval = setInterval(() => {
-        setMaskingProgress((prev) => Math.min(prev + 3, 90));
-      }, 200);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      setMaskingStatus("Initializing masking engine...");
+      setMaskingProgress(40);
+
+      await new Promise((resolve) => setTimeout(resolve, 400));
+
+      setMaskingStatus("Applying PII masks to document...");
+      setMaskingProgress(70);
 
       // Apply masking
       console.log(
@@ -428,8 +455,13 @@ export function SimpleMaskingStep({
         detectedPIIData.document_id
       );
 
-      clearInterval(progressInterval);
+      setMaskingStatus("Finalizing masked document...");
+      setMaskingProgress(95);
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
       setMaskingProgress(100);
+      setMaskingStatus("Masking completed successfully!");
 
       if (response.status === "success" && response.data) {
         console.log("PII masking completed:", response.data);
@@ -453,6 +485,7 @@ export function SimpleMaskingStep({
     } catch (error) {
       console.error("Masking error:", error);
       setMaskingProgress(100);
+      setMaskingStatus("Masking failed");
 
       toast({
         title: "Masking Failed",
@@ -615,11 +648,13 @@ export function SimpleMaskingStep({
         >
           <div className="text-center">
             <p className="font-medium">Applying PII masking...</p>
-            <p className="text-sm text-muted-foreground">
-              Processing {selectedItems.size} PII items
-            </p>
+            <p className="text-sm text-muted-foreground">{maskingStatus}</p>
           </div>
           <Progress value={maskingProgress} className="w-full" />
+          <p className="text-xs text-center text-muted-foreground">
+            Processing {selectedItems.size} PII items - {maskingProgress}%
+            complete
+          </p>
         </motion.div>
       )}
 
@@ -915,7 +950,7 @@ export function SimpleMaskingStep({
       )}
 
       {/* Action Button */}
-      {!maskingResults && (
+      {!maskingResults && showApplyButton && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}

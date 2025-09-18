@@ -15,7 +15,6 @@ import {
   Line,
 } from "recharts";
 import { FileText, Upload, Download, Trash2, Search } from "lucide-react";
-import { MetricCard } from "@/components/ui/metric-card";
 import { WorkflowTracker } from "@/components/ui/workflow-tracker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,19 +34,8 @@ interface Document {
   status: string;
 }
 
-interface DocumentStats {
-  total_documents: number;
-  total_size_bytes: number;
-  total_size_mb: number;
-  file_types: Record<string, { count: number; size: number }>;
-}
-
 export default function Dashboard() {
   const [documents, setDocuments] = useState<Document[]>([]);
-  const [stats, setStats] = useState<DocumentStats | null>(null);
-  const [documentStatuses, setDocumentStatuses] = useState<Record<string, any>>(
-    {}
-  );
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
@@ -56,41 +44,10 @@ export default function Dashboard() {
   const fetchDocuments = async () => {
     try {
       setLoading(true);
-      const [docsResponse, statsResponse] = await Promise.all([
-        documentsApi.list(),
-        documentsApi.getStats(),
-      ]);
+      const [docsResponse] = await Promise.all([documentsApi.list()]);
 
       if (docsResponse.status === "success" && docsResponse.data) {
         setDocuments(docsResponse.data.documents);
-
-        // Fetch status for each document to check if masked versions are available
-        const statusPromises = docsResponse.data.documents.map(
-          async (doc: Document) => {
-            try {
-              const statusResponse =
-                await simpleProcessingApi.getDocumentStatus(doc.id);
-              return { [doc.id]: statusResponse.data };
-            } catch (error) {
-              console.error(
-                `Failed to get status for document ${doc.id}:`,
-                error
-              );
-              return { [doc.id]: null };
-            }
-          }
-        );
-
-        const statusResults = await Promise.all(statusPromises);
-        const statusMap = statusResults.reduce(
-          (acc, curr) => ({ ...acc, ...curr }),
-          {}
-        );
-        setDocumentStatuses(statusMap);
-      }
-
-      if (statsResponse.status === "success" && statsResponse.data) {
-        setStats(statsResponse.data);
       }
     } catch (error) {
       console.error("Failed to fetch documents:", error);
@@ -188,10 +145,6 @@ export default function Dashboard() {
     }
   };
 
-  const getDocumentStatus = (documentId: string) => {
-    return documentStatuses[documentId] || null;
-  };
-
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return "0 Bytes";
     const k = 1024;
@@ -210,20 +163,6 @@ export default function Dashboard() {
     });
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "uploaded":
-        return "bg-green-100 text-green-800";
-      case "processing":
-        return "bg-yellow-100 text-yellow-800";
-      case "error":
-        return "bg-red-100 text-red-800";
-      default:
-        return "bg-gray-100 text-gray-800";
-    }
-  };
-
-  // Filter documents based on search term and active tab
   const filteredDocuments = documents.filter((doc) => {
     const matchesSearch = doc.name
       .toLowerCase()
@@ -249,53 +188,6 @@ export default function Dashboard() {
         </p>
       </motion.div>
 
-      {/* Metrics Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
-        {/* Dynamic Documents Metric */}
-        {stats && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.1 }}
-          >
-            <MetricCard
-              metric={{
-                id: "documents",
-                title: "Total Documents",
-                value: stats.total_documents,
-                change: 12.5,
-                trend: "up",
-                unit: "",
-                icon: "FileText",
-              }}
-              index={0}
-            />
-          </motion.div>
-        )}
-
-        {/* Dynamic Storage Metric */}
-        {stats && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.15 }}
-          >
-            <MetricCard
-              metric={{
-                id: "storage",
-                title: "Storage Used",
-                value: stats.total_size_mb.toFixed(1) + " KB",
-                change: 8.2,
-                trend: "up",
-                unit: "KB",
-                icon: "HardDrive",
-              }}
-              index={1}
-            />
-          </motion.div>
-        )}
-      </div>
-
       {/* Recent Documents Section */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -307,15 +199,8 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <CardTitle className="text-xl font-semibold text-foreground">
-                  Recent Masked Documents
+                  Masked Documents
                 </CardTitle>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {stats
-                    ? `${
-                        stats.total_documents
-                      } total documents (${stats.total_size_mb.toFixed(1)} KB)`
-                    : "Loading..."}
-                </p>
               </div>
               <div className="flex items-center space-x-2">
                 <div className="relative">
@@ -350,9 +235,7 @@ export default function Dashboard() {
                     <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
 
                     <p className="text-muted-foreground mb-4">
-                      {documents.length === 0
-                        ? "Upload your first document to get started"
-                        : "Try adjusting your search criteria or switching tabs"}
+                      Upload your first document to get started
                     </p>
                     {documents.length === 0 && (
                       <Button

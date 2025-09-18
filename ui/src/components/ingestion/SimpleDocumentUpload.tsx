@@ -1,7 +1,12 @@
 import { useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Upload } from "lucide-react";
+import { Upload, Eye, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { FileText } from "lucide-react";
 import { simpleProcessingApi } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
@@ -16,15 +21,23 @@ interface UploadedFile {
 
 interface SimpleDocumentUploadProps {
   onUploadComplete: (files: UploadedFile[]) => void;
+  onStartDetection?: () => void;
+  uploadedFiles?: UploadedFile[];
 }
 
 export function SimpleDocumentUpload({
   onUploadComplete,
+  onStartDetection,
+  uploadedFiles: externalUploadedFiles,
 }: SimpleDocumentUploadProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const { toast } = useToast();
+
+  // Use external uploaded files if provided, otherwise use internal state
+  const currentUploadedFiles = externalUploadedFiles || uploadedFiles;
+  const hasUploadedFiles = currentUploadedFiles.length > 0;
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -49,86 +62,129 @@ export function SimpleDocumentUpload({
     try {
       const filesArray = Array.from(files);
 
-      // Only support single document for simple processing
-      if (filesArray.length > 1) {
-        toast({
-          title: "Single file only",
-          description: "Please upload one document at a time.",
-          variant: "destructive",
-        });
-        setIsUploading(false);
-        return;
-      }
-
-      const file = filesArray[0];
-
-      // Check supported file types
-      const supportedTypes = [
-        "application/pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "text/plain",
-      ];
-
-      if (!supportedTypes.includes(file.type)) {
-        toast({
-          title: "Invalid file type",
-          description:
-            "Only PDF, Word (.docx), and text (.txt) files are supported.",
-          variant: "destructive",
-        });
-        setIsUploading(false);
-        return;
-      }
-
-      // Create initial file object for UI feedback
-      const newFile: UploadedFile = {
+      // Create initial file objects for UI feedback
+      const newFiles: UploadedFile[] = filesArray.map((file) => ({
         id: Math.random().toString(36).substr(2, 9),
         name: file.name,
         size: file.size,
         type: file.type,
         progress: 0,
         status: "uploading",
-      };
+      }));
 
-      setUploadedFiles([newFile]);
+      setUploadedFiles(newFiles);
+
+      // Check supported file types for all files
+      const supportedTypes = [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "text/plain",
+      ];
+
+      const invalidFiles = filesArray.filter(
+        (file) => !supportedTypes.includes(file.type)
+      );
+
+      if (invalidFiles.length > 0) {
+        toast({
+          title: "Invalid file types",
+          description: `${invalidFiles.length} file(s) are not supported. Only PDF, Word (.docx), and text (.txt) files are supported.`,
+          variant: "destructive",
+        });
+        setIsUploading(false);
+        return;
+      }
 
       // Simulate progress for UI feedback
       const progressInterval = setInterval(() => {
         setUploadedFiles((prev) =>
           prev.map((f) => ({
             ...f,
-            progress: Math.min(f.progress + 10, 90),
+            progress:
+              f.status === "uploading"
+                ? Math.min(f.progress + 10, 90)
+                : f.progress,
           }))
         );
       }, 200);
 
-      // Upload using simple processing API
-      const response = await simpleProcessingApi.uploadDocument(file);
+      try {
+        let response;
+        if (filesArray.length === 1) {
+          // Single file upload (backward compatibility)
+          response = await simpleProcessingApi.uploadDocument(filesArray[0]);
+        } else {
+          // Multiple file upload
+          response = await simpleProcessingApi.uploadMultipleDocuments(
+            filesArray
+          );
+        }
 
-      clearInterval(progressInterval);
+        clearInterval(progressInterval);
 
-      if (response.status === "success" && response.data) {
-        // Update file with completed status and real document ID
-        const completedFile: UploadedFile = {
-          id: response.data.document_id,
-          name: response.data.filename,
-          size: response.data.size,
-          type: file.type,
-          progress: 100,
-          status: "completed",
-        };
+        if (response.status === "success" && response.data) {
+          let completedFiles: UploadedFile[];
 
-        setUploadedFiles([completedFile]);
+          if (response.data.uploaded_documents) {
+            // Bulk upload response
+            completedFiles = response.data.uploaded_documents.map(
+              (doc: any) => ({
+                id: doc.document_id,
+                name: doc.filename,
+                size: doc.size,
+                type:
+                  filesArray.find((f) => f.name === doc.filename)?.type ||
+                  "application/octet-stream",
+                progress: 100,
+                status: "completed" as const,
+              })
+            );
 
-        toast({
-          title: "Upload successful",
-          description: `${file.name} has been uploaded successfully.`,
-        });
+            // Show results
+            const successCount = response.data.successful_uploads;
+            const failCount = response.data.failed_count;
 
-        // Notify parent component
-        onUploadComplete([completedFile]);
-      } else {
-        throw new Error(response.error?.message || "Upload failed");
+            if (failCount > 0) {
+              toast({
+                title: "Partial upload success",
+                description: `${successCount} files uploaded successfully, ${failCount} files failed.`,
+                variant: "default",
+              });
+            } else {
+              toast({
+                title: "Upload successful",
+                description: `All ${successCount} files have been uploaded successfully.`,
+              });
+            }
+          } else {
+            // Single file upload response
+            completedFiles = [
+              {
+                id: response.data.document_id,
+                name: response.data.filename,
+                size: response.data.size,
+                type: filesArray[0].type,
+                progress: 100,
+                status: "completed",
+              },
+            ];
+
+            toast({
+              title: "Upload successful",
+              description: `${filesArray[0].name} has been uploaded successfully.`,
+            });
+          }
+
+          setUploadedFiles(completedFiles);
+
+          // Notify parent component
+          onUploadComplete(completedFiles);
+        } else {
+          throw new Error(response.error?.message || "Upload failed");
+        }
+      } catch (uploadError) {
+        clearInterval(progressInterval);
+        throw uploadError;
       }
     } catch (error) {
       console.error("Upload error:", error);
@@ -181,10 +237,10 @@ export function SimpleDocumentUpload({
         animate={{ opacity: 1, y: 0 }}
         className="text-center space-y-4"
       >
-        <h2 className="text-2xl font-semibold">Upload Document</h2>
+        <h2 className="text-2xl font-semibold">Upload Documents</h2>
         <p className="text-muted-foreground max-w-md mx-auto">
-          Upload your document to begin PII detection and masking. Supports PDF,
-          Word (.docx), and text (.txt) files.
+          Upload one or more documents to begin PII detection and masking.
+          Supports PDF, Word (.docx), and text (.txt) files.
         </p>
       </motion.div>
       {/* Upload Area */}
@@ -210,13 +266,13 @@ export function SimpleDocumentUpload({
           </div>
           <div>
             <p className="text-lg font-medium">
-              Drop your document here, or{" "}
+              Drop your documents here, or{" "}
               <button className="text-blue-600 hover:underline">
                 browse files
               </button>
             </p>
             <p className="text-sm text-muted-foreground">
-              Supports: PDF, Word (.docx), Text (.txt) - max 50MB
+              Supports: PDF, Word (.docx), Text (.txt) - max 50MB each
             </p>
           </div>
           <input
@@ -225,9 +281,239 @@ export function SimpleDocumentUpload({
             accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
             onChange={handleFileInput}
             disabled={isUploading}
+            multiple
           />
         </div>
       </motion.div>
+
+      {/* Uploaded Files Display */}
+      {hasUploadedFiles && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="space-y-6"
+        >
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-medium">Uploaded Files</h3>
+            <Badge variant="secondary">
+              {currentUploadedFiles.length} files
+            </Badge>
+          </div>
+
+          {/* File Tabs for Preview */}
+          {currentUploadedFiles.length > 1 ? (
+            <Tabs defaultValue={currentUploadedFiles[0]?.id} className="w-full">
+              <TabsList
+                className="grid w-full"
+                style={{
+                  gridTemplateColumns: `repeat(${currentUploadedFiles.length}, 1fr)`,
+                }}
+              >
+                {currentUploadedFiles.map((file) => (
+                  <TabsTrigger
+                    key={file.id}
+                    value={file.id}
+                    className="flex items-center space-x-2"
+                  >
+                    <FileText className="w-4 h-4" />
+                    <span className="truncate max-w-[120px]">{file.name}</span>
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+
+              {currentUploadedFiles.map((file) => (
+                <TabsContent
+                  key={file.id}
+                  value={file.id}
+                  className="space-y-4"
+                >
+                  {renderFilePreview(file)}
+                </TabsContent>
+              ))}
+            </Tabs>
+          ) : (
+            // Single file - no tabs needed
+            currentUploadedFiles.length === 1 &&
+            renderFilePreview(currentUploadedFiles[0])
+          )}
+
+          {/* Start Detection Button */}
+          {onStartDetection && (
+            <div className="flex justify-center pt-4">
+              <Button
+                onClick={onStartDetection}
+                size="lg"
+                className="px-8"
+                disabled={
+                  !currentUploadedFiles.every(
+                    (file) => file.status === "completed"
+                  )
+                }
+              >
+                <Eye className="w-5 h-5 mr-2" />
+                Start PII Detection for All Files
+              </Button>
+            </div>
+          )}
+        </motion.div>
+      )}
+
+      {/* Original Simple Files List (fallback) */}
+      {!externalUploadedFiles && uploadedFiles.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="space-y-4"
+        >
+          <h3 className="text-lg font-medium">Uploaded Files</h3>
+          <div className="space-y-2">
+            {uploadedFiles.map((file) => (
+              <div
+                key={file.id}
+                className="flex items-center justify-between p-4 border rounded-lg bg-card"
+              >
+                <div className="flex items-center space-x-3">
+                  <div
+                    className={cn(
+                      "w-3 h-3 rounded-full",
+                      file.status === "completed" && "bg-green-500",
+                      file.status === "uploading" &&
+                        "bg-blue-500 animate-pulse",
+                      file.status === "error" && "bg-red-500"
+                    )}
+                  />
+                  <div>
+                    <p className="font-medium">{file.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {(file.size / 1024 / 1024).toFixed(2)} MB
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  {file.status === "uploading" && (
+                    <div className="text-sm text-muted-foreground">
+                      {file.progress}%
+                    </div>
+                  )}
+                  <div
+                    className={cn(
+                      "text-sm font-medium",
+                      file.status === "completed" && "text-green-600",
+                      file.status === "uploading" && "text-blue-600",
+                      file.status === "error" && "text-red-600"
+                    )}
+                  >
+                    {file.status === "completed" && "Uploaded"}
+                    {file.status === "uploading" && "Uploading..."}
+                    {file.status === "error" && "Failed"}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      )}
     </div>
   );
+
+  // Helper function to render file preview
+  function renderFilePreview(file: UploadedFile) {
+    return (
+      <div className="space-y-4">
+        {/* File Info */}
+        <div className="flex items-center justify-between p-4 border rounded-lg bg-card">
+          <div className="flex items-center space-x-3">
+            <div
+              className={cn(
+                "w-3 h-3 rounded-full",
+                file.status === "completed" && "bg-green-500",
+                file.status === "uploading" && "bg-blue-500 animate-pulse",
+                file.status === "error" && "bg-red-500"
+              )}
+            />
+            <div>
+              <p className="font-medium">{file.name}</p>
+              <p className="text-sm text-muted-foreground">
+                {(file.size / 1024 / 1024).toFixed(2)} MB •{" "}
+                {file.status === "completed"
+                  ? "Ready for PII detection"
+                  : file.status}
+              </p>
+            </div>
+          </div>
+          <Badge
+            variant={file.status === "completed" ? "secondary" : "outline"}
+          >
+            {file.status === "completed" ? "Uploaded" : file.status}
+          </Badge>
+        </div>
+
+        {/* Document Preview - Only for PDFs */}
+        {file.type === "application/pdf" && file.status === "completed" && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="font-medium flex items-center">
+                <Eye className="w-5 h-5 mr-2" />
+                Document Preview
+              </h4>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  window.open(
+                    simpleProcessingApi.getPreviewUrl(file.id),
+                    "_blank"
+                  );
+                }}
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Open PDF
+              </Button>
+            </div>
+            <Card>
+              <CardContent className="p-4">
+                <div className="rounded-lg overflow-hidden bg-white">
+                  <iframe
+                    src={simpleProcessingApi.getPreviewUrl(file.id)}
+                    className="w-full h-[500px] border-0"
+                    title="Document Preview"
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Non-PDF Document Info */}
+        {file.type !== "application/pdf" && file.status === "completed" && (
+          <Card>
+            <CardContent className="p-8 text-center">
+              <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <h4 className="text-lg font-medium mb-2">
+                {file.type.includes("word") ? "Word Document" : "Text Document"}
+              </h4>
+              <p className="text-muted-foreground mb-4">
+                Preview not available for this file type. The document is ready
+                for PII detection.
+              </p>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  window.open(
+                    simpleProcessingApi.getPreviewUrl(file.id),
+                    "_blank"
+                  );
+                }}
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Download to View
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    );
+  }
 }

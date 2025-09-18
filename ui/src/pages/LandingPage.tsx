@@ -483,10 +483,7 @@ export default function LandingPage() {
       </section>
 
       {/* API Documentation Section */}
-      <section
-        id="api-section"
-        className="px-6 py-20 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30"
-      >
+      <section id="api-section" className="px-6 py-20">
         <div className="max-w-7xl mx-auto">
           <motion.div
             initial={{ y: 20, opacity: 0 }}
@@ -499,9 +496,11 @@ export default function LandingPage() {
               Integrate PII Protection
             </h2>
             <p className="text-xl text-muted-foreground max-w-3xl mx-auto mb-8">
-              Simple REST API for automatic PII detection and masking. Upload a
-              document, get back a masked version with all sensitive data
-              protected.
+              Comprehensive REST API for automatic PII detection and masking
+              using advanced AI. Supports 25+ PII types including names,
+              financial data, technical identifiers, and location information.
+              Upload a document, get back a masked version with all sensitive
+              data protected.
             </p>
           </motion.div>
 
@@ -540,15 +539,20 @@ export default function LandingPage() {
                     <ul className="space-y-2 text-muted-foreground">
                       <li className="flex items-start">
                         <CheckCircle className="h-4 w-4 mr-2 text-green-500 mt-0.5 flex-shrink-0" />
-                        Automatic PII detection using LLM & BERT NER
+                        Advanced PII detection (25+ types: financial, medical,
+                        technical, personal)
                       </li>
                       <li className="flex items-start">
                         <CheckCircle className="h-4 w-4 mr-2 text-green-500 mt-0.5 flex-shrink-0" />
-                        Intelligent masking strategies
+                        Hybrid AI approach (LLM + BERT NER + regex patterns)
                       </li>
                       <li className="flex items-start">
                         <CheckCircle className="h-4 w-4 mr-2 text-green-500 mt-0.5 flex-shrink-0" />
-                        Support for PDF, DOCX, TXT files, CSVs, Images and more
+                        Context-aware intelligent masking strategies
+                      </li>
+                      <li className="flex items-start">
+                        <CheckCircle className="h-4 w-4 mr-2 text-green-500 mt-0.5 flex-shrink-0" />
+                        Support for PDF, DOCX, TXT files
                       </li>
 
                       <li className="flex items-start">
@@ -559,28 +563,142 @@ export default function LandingPage() {
                   </div>
 
                   <div>
-                    <h4 className="font-semibold text-foreground mb-2">
-                      Supported PII Types
+                    <h4 className="font-semibold text-foreground mb-3">
+                      Comprehensive PII Detection
                     </h4>
-                    <div className="flex flex-wrap gap-2">
-                      {[
-                        "Names",
-                        "Emails",
-                        "Phones",
-                        "SSN",
-                        "Credit Cards",
-                        "Addresses",
-                        "Organizations",
-                        "Dates",
-                      ].map((type) => (
-                        <Badge
-                          key={type}
-                          variant="secondary"
-                          className="text-xs"
-                        >
-                          {type}
-                        </Badge>
-                      ))}
+
+                    <div className="space-y-3">
+                      <div>
+                        <h5 className="text-sm font-medium text-muted-foreground mb-2">
+                          Personal Identifiers
+                        </h5>
+                        <div className="flex flex-wrap gap-1">
+                          {[
+                            "Names",
+                            "SSN",
+                            "Passport",
+                            "Driver License",
+                            "Organizations",
+                          ].map((type) => (
+                            <Badge
+                              key={type}
+                              variant="secondary"
+                              className="text-xs"
+                            >
+                              {type}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h5 className="text-sm font-medium text-muted-foreground mb-2">
+                          Contact Information
+                        </h5>
+                        <div className="flex flex-wrap gap-1">
+                          {["Email", "Phone", "Address", "ZIP Codes"].map(
+                            (type) => (
+                              <Badge
+                                key={type}
+                                variant="secondary"
+                                className="text-xs"
+                              >
+                                {type}
+                              </Badge>
+                            )
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h5 className="text-sm font-medium text-muted-foreground mb-2">
+                          Financial Data
+                        </h5>
+                        <div className="flex flex-wrap gap-1">
+                          {[
+                            "Credit Cards",
+                            "Bank Accounts",
+                            "PAN",
+                            "Aadhaar",
+                          ].map((type) => (
+                            <Badge
+                              key={type}
+                              variant="secondary"
+                              className="text-xs"
+                            >
+                              {type}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h5 className="text-sm font-medium text-muted-foreground mb-2">
+                          Identifiers & Records
+                        </h5>
+                        <div className="flex flex-wrap gap-1">
+                          {[
+                            "Employee ID",
+                            "Student ID",
+                            "Medical Records",
+                            "Insurance ID",
+                            "Date of Birth",
+                          ].map((type) => (
+                            <Badge
+                              key={type}
+                              variant="secondary"
+                              className="text-xs"
+                            >
+                              {type}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h5 className="text-sm font-medium text-muted-foreground mb-2">
+                          Technical & Location
+                        </h5>
+                        <div className="flex flex-wrap gap-1">
+                          {[
+                            "IP Address",
+                            "MAC Address",
+                            "URLs",
+                            "GPS Coordinates",
+                            "Vehicle Plates",
+                          ].map((type) => (
+                            <Badge
+                              key={type}
+                              variant="secondary"
+                              className="text-xs"
+                            >
+                              {type}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h5 className="text-sm font-medium text-muted-foreground mb-2">
+                          Tracking & Codes
+                        </h5>
+                        <div className="flex flex-wrap gap-1">
+                          {[
+                            "Tracking Numbers",
+                            "Barcodes",
+                            "Vaccine Lots",
+                            "Receipt Numbers",
+                          ].map((type) => (
+                            <Badge
+                              key={type}
+                              variant="secondary"
+                              className="text-xs"
+                            >
+                              {type}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   </div>
 

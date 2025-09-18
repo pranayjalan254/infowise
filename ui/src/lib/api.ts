@@ -727,6 +727,24 @@ export const simpleProcessingApi = {
     });
   },
 
+  uploadMultipleDocuments: (files: FileList | File[]) => {
+    const formData = new FormData();
+    Array.from(files).forEach((file) => {
+      formData.append("files", file);
+    });
+
+    return fetch(`${API_BASE_URL}/simple/upload/bulk`, {
+      method: "POST",
+      body: formData,
+    }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error?.message || "Bulk upload failed");
+      }
+      return data;
+    });
+  },
+
   generateConfig: (documentId: string) =>
     fetch(`${API_BASE_URL}/simple/generate-config/${documentId}`, {
       method: "POST",
@@ -734,6 +752,21 @@ export const simpleProcessingApi = {
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error?.message || "Config generation failed");
+      }
+      return data;
+    }),
+
+  generateConfigBulk: (documentIds: string[]) =>
+    fetch(`${API_BASE_URL}/simple/generate-config/bulk`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ document_ids: documentIds }),
+    }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error?.message || "Bulk config generation failed");
       }
       return data;
     }),
@@ -771,6 +804,21 @@ export const simpleProcessingApi = {
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error?.message || "Masking failed");
+      }
+      return data;
+    }),
+
+  applyMaskingBulk: (documentIds: string[]) =>
+    fetch(`${API_BASE_URL}/simple/apply-masking/bulk`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ document_ids: documentIds }),
+    }).then(async (response) => {
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error?.message || "Bulk masking failed");
       }
       return data;
     }),

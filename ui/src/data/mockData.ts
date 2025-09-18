@@ -198,22 +198,17 @@ export const mockWorkflowSteps: WorkflowStep[] = [
     description: "AI scans and identifies PII across all documents",
   },
   {
-    id: "policy",
-    name: "Policy Advisor",
+    id: "qa",
+    name: "Quality Assurance",
     status: "active",
-    description: "Compliance analysis and risk assessment",
+    description: "Human review and validation of results",
   },
+
   {
     id: "masking",
     name: "Masking",
     status: "pending",
     description: "Apply data protection and anonymization",
-  },
-  {
-    id: "qa",
-    name: "Quality Assurance",
-    status: "pending",
-    description: "Human review and validation of results",
   },
 ];
 

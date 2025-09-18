@@ -5,7 +5,20 @@ import { SimpleDetectionStep } from "@/components/ingestion/SimpleDetectionStep"
 import { SimpleMaskingStep } from "@/components/ingestion/SimpleMaskingStep";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle, Circle, Clock } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  CheckCircle,
+  Circle,
+  Clock,
+  FileText,
+  Wand2,
+  Eye,
+  Download,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { simpleProcessingApi } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 interface UploadedFile {
   id: string;
@@ -16,11 +29,22 @@ interface UploadedFile {
   status: "uploading" | "completed" | "error";
 }
 
+interface FileProcessingState {
+  fileId: string;
+  fileName: string;
+  currentStep: "upload" | "detection" | "masking";
+  detectionStatus: "pending" | "processing" | "completed" | "error";
+  maskingStatus: "pending" | "processing" | "completed" | "error";
+  detectedPIIData: any;
+  maskingResults: any;
+  error?: string;
+}
+
 interface WorkflowStep {
   id: string;
   name: string;
   status: "pending" | "active" | "completed";
-  icon: "upload" | "detection" | "masking";
+  icon: "upload" | "review" | "detection" | "masking";
 }
 
 const workflowSteps: WorkflowStep[] = [
@@ -34,56 +58,317 @@ const workflowSteps: WorkflowStep[] = [
   { id: "masking", name: "PII Masking", status: "pending", icon: "masking" },
 ];
 
+// Utility function to determine severity from PII type
+const getSeverityFromType = (type: string): "low" | "medium" | "high" => {
+  const highRiskTypes = ["ssn", "credit_card", "passport", "driver_license"];
+  const mediumRiskTypes = ["phone", "email", "address", "date_of_birth"];
+
+  const lowercaseType = type.toLowerCase();
+
+  if (highRiskTypes.some((riskType) => lowercaseType.includes(riskType))) {
+    return "high";
+  } else if (
+    mediumRiskTypes.some((riskType) => lowercaseType.includes(riskType))
+  ) {
+    return "medium";
+  }
+  return "low";
+};
+
 export default function SimpleDocumentIngestion() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [currentPhase, setCurrentPhase] = useState<
     "upload" | "detection" | "masking"
   >("upload");
   const [steps, setSteps] = useState(workflowSteps);
-  const [detectedPIIData, setDetectedPIIData] = useState<any>(null);
-  const [_maskingResults, setMaskingResults] = useState<any>(null);
+  const [fileProcessingStates, setFileProcessingStates] = useState<
+    FileProcessingState[]
+  >([]);
+  const [activeFileTab, setActiveFileTab] = useState<string>("");
+  const { toast } = useToast();
 
-  const handleUploadComplete = (files: UploadedFile[]) => {
+  const handleUploadComplete = async (files: UploadedFile[]) => {
     console.log("Upload completed:", files);
     setUploadedFiles(files);
 
-    // Move to detection phase
-    setCurrentPhase("detection");
-    setSteps((prev) =>
-      prev.map((step) => {
-        if (step.id === "upload") return { ...step, status: "completed" };
-        if (step.id === "detection") return { ...step, status: "active" };
-        return step;
+    // Initialize processing states for each file
+    const initialProcessingStates: FileProcessingState[] = files.map(
+      (file) => ({
+        fileId: file.id,
+        fileName: file.name,
+        currentStep: "upload" as const,
+        detectionStatus: "pending" as const,
+        maskingStatus: "pending" as const,
+        detectedPIIData: null,
+        maskingResults: null,
       })
     );
+
+    setFileProcessingStates(initialProcessingStates);
+
+    // Set the first file as active tab
+    if (files.length > 0) {
+      setActiveFileTab(files[0].id);
+    }
+
+    // Stay in upload phase and let user review files before starting detection
+    toast({
+      title: "Upload Complete",
+      description: `Successfully uploaded ${files.length} file(s). Review your documents and click "Start PII Detection" when ready.`,
+    });
   };
 
-  const handleDetectionComplete = (detectionResults: any) => {
-    console.log("Detection completed:", detectionResults);
-    setDetectedPIIData(detectionResults);
+  const handleStartDetection = async () => {
+    try {
+      const documentIds = uploadedFiles.map((file) => file.id);
+      console.log("Starting bulk PII detection for documents:", documentIds);
 
-    // Move to masking phase
-    setCurrentPhase("masking");
-    setSteps((prev) =>
-      prev.map((step) => {
-        if (step.id === "detection") return { ...step, status: "completed" };
-        if (step.id === "masking") return { ...step, status: "active" };
-        return step;
-      })
-    );
+      // Update states to processing
+      setFileProcessingStates((prev) =>
+        prev.map((state) => ({
+          ...state,
+          detectionStatus: "processing" as const,
+          currentStep: "detection" as const,
+        }))
+      );
+
+      // Move to detection phase
+      setCurrentPhase("detection");
+      setSteps((prev) =>
+        prev.map((step) => {
+          if (step.id === "upload") return { ...step, status: "completed" };
+          if (step.id === "detection") return { ...step, status: "active" };
+          return step;
+        })
+      );
+
+      const response = await simpleProcessingApi.generateConfigBulk(
+        documentIds
+      );
+
+      if (response.status === "success" && response.data) {
+        const { successful_configs, failed_configs } = response.data;
+
+        // Update processing states with detection results
+        setFileProcessingStates((prev) =>
+          prev.map((state) => {
+            const successConfig = successful_configs.find(
+              (config: any) => config.document_id === state.fileId
+            );
+            const failedConfig = failed_configs.find(
+              (config: any) => config.document_id === state.fileId
+            );
+
+            if (successConfig) {
+              return {
+                ...state,
+                detectionStatus: "completed" as const,
+                detectedPIIData: {
+                  document_id: successConfig.document_id,
+                  total_pii: successConfig.total_pii,
+                  config_data: successConfig.config_data.map(
+                    (item: any, index: number) => ({
+                      id: item.id || `pii_${index}`,
+                      type: item.type,
+                      text: item.text,
+                      confidence: 0.9,
+                      location: `Page ${item.page + 1}`,
+                      severity: getSeverityFromType(item.type),
+                      suggested_strategy: item.strategy,
+                      coordinates: item.coordinates,
+                    })
+                  ),
+                },
+                currentStep: "masking" as const,
+              };
+            } else if (failedConfig) {
+              return {
+                ...state,
+                detectionStatus: "error" as const,
+                error: failedConfig.error,
+              };
+            }
+            return state;
+          })
+        );
+
+        // Move to masking phase
+        setCurrentPhase("masking");
+        setSteps((prev) =>
+          prev.map((step) => {
+            if (step.id === "detection")
+              return { ...step, status: "completed" };
+            if (step.id === "masking") return { ...step, status: "active" };
+            return step;
+          })
+        );
+
+        toast({
+          title: "PII Detection Complete",
+          description: `Detected PII in ${successful_configs.length} of ${uploadedFiles.length} files.`,
+        });
+      }
+    } catch (error) {
+      console.error("Bulk detection error:", error);
+      // Update all files to error state
+      setFileProcessingStates((prev) =>
+        prev.map((state) => ({
+          ...state,
+          detectionStatus: "error" as const,
+          error: error instanceof Error ? error.message : "Detection failed",
+        }))
+      );
+
+      toast({
+        title: "Detection Failed",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Failed to detect PII in documents",
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleMaskingComplete = (results: any) => {
-    console.log("Masking completed:", results);
-    setMaskingResults(results);
+  const handleMaskingComplete = (fileId: string, results: any) => {
+    console.log("Individual masking completed for file:", fileId, results);
 
-    // Mark masking as completed
-    setSteps((prev) =>
-      prev.map((step) => {
-        if (step.id === "masking") return { ...step, status: "completed" };
-        return step;
-      })
+    setFileProcessingStates((prev) =>
+      prev.map((state) =>
+        state.fileId === fileId
+          ? { ...state, maskingStatus: "completed", maskingResults: results }
+          : state
+      )
     );
+
+    // Check if all files have completed masking
+    const updatedStates = fileProcessingStates.map((state) =>
+      state.fileId === fileId
+        ? { ...state, maskingStatus: "completed" as const }
+        : state
+    );
+
+    const allMaskingComplete = updatedStates.every(
+      (state) => state.maskingStatus === "completed"
+    );
+
+    if (allMaskingComplete) {
+      // Mark masking as completed
+      setSteps((prev) =>
+        prev.map((step) => {
+          if (step.id === "masking") return { ...step, status: "completed" };
+          return step;
+        })
+      );
+    }
+  };
+
+  const handleBulkMasking = async () => {
+    try {
+      // Get all document IDs that have completed detection
+      const documentsToMask = fileProcessingStates
+        .filter(
+          (state) =>
+            state.detectionStatus === "completed" && state.detectedPIIData
+        )
+        .map((state) => state.fileId);
+
+      if (documentsToMask.length === 0) {
+        toast({
+          title: "No files ready",
+          description: "No files have completed PII detection yet.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Set all files to processing state
+      setFileProcessingStates((prev) =>
+        prev.map((state) =>
+          documentsToMask.includes(state.fileId)
+            ? { ...state, maskingStatus: "processing" as const }
+            : state
+        )
+      );
+
+      console.log("Starting bulk masking for documents:", documentsToMask);
+      const response = await simpleProcessingApi.applyMaskingBulk(
+        documentsToMask
+      );
+
+      if (response.status === "success" && response.data) {
+        const { successful_maskings, failed_maskings } = response.data;
+
+        // Update processing states with masking results
+        setFileProcessingStates((prev) =>
+          prev.map((state) => {
+            const successMasking = successful_maskings.find(
+              (masking: any) => masking.document_id === state.fileId
+            );
+            const failedMasking = failed_maskings.find(
+              (masking: any) => masking.document_id === state.fileId
+            );
+
+            if (successMasking) {
+              return {
+                ...state,
+                maskingStatus: "completed" as const,
+                maskingResults: successMasking,
+              };
+            } else if (failedMasking) {
+              return {
+                ...state,
+                maskingStatus: "error" as const,
+                error: failedMasking.error,
+              };
+            }
+            return state;
+          })
+        );
+
+        // Mark masking as completed
+        setSteps((prev) =>
+          prev.map((step) => {
+            if (step.id === "masking") return { ...step, status: "completed" };
+            return step;
+          })
+        );
+
+        toast({
+          title: "Masking Complete",
+          description: `Successfully masked ${successful_maskings.length} of ${documentsToMask.length} files.`,
+        });
+      }
+    } catch (error) {
+      console.error("Bulk masking error:", error);
+
+      // Update all processing files to error state
+      setFileProcessingStates((prev) =>
+        prev.map((state) =>
+          state.maskingStatus === "processing"
+            ? {
+                ...state,
+                maskingStatus: "error" as const,
+                error:
+                  error instanceof Error ? error.message : "Masking failed",
+              }
+            : state
+        )
+      );
+
+      toast({
+        title: "Masking Failed",
+        description:
+          error instanceof Error ? error.message : "Failed to mask documents",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const getFileProcessingState = (
+    fileId: string
+  ): FileProcessingState | undefined => {
+    return fileProcessingStates.find((state) => state.fileId === fileId);
   };
 
   const getStepIcon = (step: WorkflowStep) => {
@@ -128,8 +413,8 @@ export default function SimpleDocumentIngestion() {
         <div className="text-center space-y-4">
           <h1 className="text-3xl font-bold">Document PII Processing</h1>
           <p className="text-muted-foreground">
-            Upload your document, detect PII, configure masking strategies, and
-            download the protected version.
+            Upload your documents, detect PII, configure masking strategies, and
+            download the protected versions.
           </p>
         </div>
 
@@ -159,22 +444,202 @@ export default function SimpleDocumentIngestion() {
         <Card>
           <CardContent className="p-8">
             {currentPhase === "upload" && (
-              <SimpleDocumentUpload onUploadComplete={handleUploadComplete} />
-            )}
-
-            {currentPhase === "detection" && (
-              <SimpleDetectionStep
+              <SimpleDocumentUpload
+                onUploadComplete={handleUploadComplete}
+                onStartDetection={handleStartDetection}
                 uploadedFiles={uploadedFiles}
-                onDetectionComplete={handleDetectionComplete}
               />
             )}
 
-            {currentPhase === "masking" && detectedPIIData && (
-              <SimpleMaskingStep
-                detectedPIIData={detectedPIIData}
-                onMaskingComplete={handleMaskingComplete}
-              />
-            )}
+            {(currentPhase === "detection" || currentPhase === "masking") &&
+              uploadedFiles.length > 0 && (
+                <div className="space-y-6">
+                  {/* Overall Status Display */}
+                  <div className="flex justify-between items-center">
+                    <div className="text-sm text-muted-foreground">
+                      Processing {uploadedFiles.length} files
+                    </div>
+                    {currentPhase === "masking" && (
+                      <Button
+                        onClick={handleBulkMasking}
+                        className="flex items-center space-x-2"
+                      >
+                        <Wand2 className="w-4 h-4" />
+                        <span>Apply Masking to All Files</span>
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* File Tabs */}
+                  <Tabs
+                    value={activeFileTab}
+                    onValueChange={setActiveFileTab}
+                    className="w-full"
+                  >
+                    <TabsList
+                      className="grid w-full"
+                      style={{
+                        gridTemplateColumns: `repeat(${uploadedFiles.length}, 1fr)`,
+                      }}
+                    >
+                      {uploadedFiles.map((file) => {
+                        const processingState = getFileProcessingState(file.id);
+                        return (
+                          <TabsTrigger
+                            key={file.id}
+                            value={file.id}
+                            className="flex items-center space-x-2"
+                          >
+                            <FileText className="w-4 h-4" />
+                            <span className="truncate max-w-[120px]">
+                              {file.name}
+                            </span>
+                            {processingState && (
+                              <div className="flex space-x-1">
+                                <div
+                                  className={cn(
+                                    "w-2 h-2 rounded-full",
+                                    processingState.detectionStatus ===
+                                      "completed"
+                                      ? "bg-green-500"
+                                      : processingState.detectionStatus ===
+                                        "processing"
+                                      ? "bg-blue-500 animate-pulse"
+                                      : processingState.detectionStatus ===
+                                        "error"
+                                      ? "bg-red-500"
+                                      : "bg-gray-300"
+                                  )}
+                                />
+                                <div
+                                  className={cn(
+                                    "w-2 h-2 rounded-full",
+                                    processingState.maskingStatus ===
+                                      "completed"
+                                      ? "bg-green-500"
+                                      : processingState.maskingStatus ===
+                                        "processing"
+                                      ? "bg-blue-500 animate-pulse"
+                                      : processingState.maskingStatus ===
+                                        "error"
+                                      ? "bg-red-500"
+                                      : "bg-gray-300"
+                                  )}
+                                />
+                              </div>
+                            )}
+                          </TabsTrigger>
+                        );
+                      })}
+                    </TabsList>
+
+                    {uploadedFiles.map((file) => {
+                      const processingState = getFileProcessingState(file.id);
+                      return (
+                        <TabsContent
+                          key={file.id}
+                          value={file.id}
+                          className="space-y-6"
+                        >
+                          {currentPhase === "detection" && (
+                            <div className="text-center space-y-4">
+                              <h3 className="text-lg font-medium">
+                                PII Detection
+                              </h3>
+                              <p className="text-muted-foreground">
+                                {processingState?.detectionStatus ===
+                                  "processing" &&
+                                  "Analyzing document for PII..."}
+                                {processingState?.detectionStatus ===
+                                  "completed" &&
+                                  `Found ${
+                                    processingState.detectedPIIData
+                                      ?.total_pii || 0
+                                  } PII entities`}
+                                {processingState?.detectionStatus === "error" &&
+                                  "Detection failed"}
+                              </p>
+                              {processingState?.detectionStatus ===
+                                "processing" && (
+                                <div className="animate-pulse flex justify-center">
+                                  <div className="w-6 h-6 bg-blue-500 rounded-full"></div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {currentPhase === "masking" &&
+                            processingState?.detectedPIIData && (
+                              <SimpleMaskingStep
+                                detectedPIIData={
+                                  processingState.detectedPIIData
+                                }
+                                onMaskingComplete={(results) =>
+                                  handleMaskingComplete(file.id, results)
+                                }
+                                showApplyButton={false}
+                                maskingResults={processingState.maskingResults}
+                              />
+                            )}
+
+                          {/* Processing Status for Current File */}
+                          {processingState && (
+                            <div className="text-center space-y-2">
+                              <div className="flex justify-center space-x-4 text-sm text-muted-foreground">
+                                <div className="flex items-center space-x-2">
+                                  <div
+                                    className={cn(
+                                      "w-3 h-3 rounded-full",
+                                      processingState.detectionStatus ===
+                                        "completed"
+                                        ? "bg-green-500"
+                                        : processingState.detectionStatus ===
+                                          "processing"
+                                        ? "bg-blue-500 animate-pulse"
+                                        : processingState.detectionStatus ===
+                                          "error"
+                                        ? "bg-red-500"
+                                        : "bg-gray-300"
+                                    )}
+                                  />
+                                  <span>
+                                    Detection: {processingState.detectionStatus}
+                                  </span>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <div
+                                    className={cn(
+                                      "w-3 h-3 rounded-full",
+                                      processingState.maskingStatus ===
+                                        "completed"
+                                        ? "bg-green-500"
+                                        : processingState.maskingStatus ===
+                                          "processing"
+                                        ? "bg-blue-500 animate-pulse"
+                                        : processingState.maskingStatus ===
+                                          "error"
+                                        ? "bg-red-500"
+                                        : "bg-gray-300"
+                                    )}
+                                  />
+                                  <span>
+                                    Masking: {processingState.maskingStatus}
+                                  </span>
+                                </div>
+                              </div>
+                              {processingState.error && (
+                                <p className="text-red-500 text-sm">
+                                  {processingState.error}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </TabsContent>
+                      );
+                    })}
+                  </Tabs>
+                </div>
+              )}
           </CardContent>
         </Card>
       </motion.div>

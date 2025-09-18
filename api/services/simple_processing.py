@@ -15,6 +15,7 @@ import uuid
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Blueprint, request, current_app, send_file
 from werkzeug.utils import secure_filename
 from werkzeug.datastructures import FileStorage
@@ -131,6 +132,48 @@ class SimpleDocumentProcessor:
             
         except Exception as e:
             raise ValueError(f"Upload failed: {str(e)}")
+
+    def upload_multiple_documents(self, files: List[FileStorage]) -> Dict[str, Any]:
+        """
+        Upload multiple documents and store them locally and in MongoDB.
+        
+        Args:
+            files: List of uploaded file objects
+            
+        Returns:
+            Dictionary with bulk upload results
+        """
+        try:
+            if not files or len(files) == 0:
+                raise ValueError("No files provided")
+            
+            uploaded_documents = []
+            failed_uploads = []
+            
+            for file in files:
+                try:
+                    result = self.upload_document(file)
+                    uploaded_documents.append(result)
+                    current_app.logger.info(f"Successfully uploaded: {result['filename']}")
+                except Exception as e:
+                    failed_uploads.append({
+                        'filename': file.filename if file and file.filename else 'unknown',
+                        'error': str(e)
+                    })
+                    current_app.logger.error(f"Failed to upload {file.filename if file and file.filename else 'unknown'}: {str(e)}")
+            
+            return {
+                'uploaded_documents': uploaded_documents,
+                'failed_uploads': failed_uploads,
+                'total_files': len(files),
+                'successful_uploads': len(uploaded_documents),
+                'failed_count': len(failed_uploads),
+                'upload_date': get_current_timestamp(),
+                'status': 'completed' if len(failed_uploads) == 0 else 'partial_success'
+            }
+            
+        except Exception as e:
+            raise ValueError(f"Bulk upload failed: {str(e)}")
     
     def generate_pii_config(self, document_id: str) -> Dict[str, Any]:
         """
@@ -144,10 +187,12 @@ class SimpleDocumentProcessor:
         """
         try:
             # Find the uploaded file - support multiple extensions
-            supported_extensions = ['*.pdf', '*.docx', '*.txt']
-            uploaded_files = []
-            for ext in supported_extensions:
-                uploaded_files.extend(list(UPLOADS_DIR.glob(f"{document_id}_{ext}")))
+            # Look for files that start with document_id_ (original naming pattern)
+            uploaded_files = list(UPLOADS_DIR.glob(f"{document_id}_*"))
+            
+            # Filter to only include supported file types
+            supported_extensions = ['.pdf', '.docx', '.txt']
+            uploaded_files = [f for f in uploaded_files if f.suffix.lower() in supported_extensions]
             
             if not uploaded_files:
                 raise ValueError(f"Document file not found for document_id: {document_id}")
@@ -161,10 +206,17 @@ class SimpleDocumentProcessor:
             # Run pii_detector_config_generator.py
             current_app.logger.info(f"Running PII detection on: {document_path}")
             
+            # Use absolute path to ensure the file is found correctly
+            absolute_document_path = document_path.resolve()
+            absolute_config_path = config_path.resolve()
+            
+            current_app.logger.info(f"Absolute document path: {absolute_document_path}")
+            current_app.logger.info(f"Document exists: {absolute_document_path.exists()}")
+            
             result = subprocess.run([
                 'python', 'pii_detector_config_generator.py',
-                str(document_path),
-                str(config_path)
+                str(absolute_document_path),
+                str(absolute_config_path)
             ], capture_output=True, text=True, cwd=current_app.root_path)
             
             if result.returncode != 0:
@@ -309,11 +361,12 @@ class SimpleDocumentProcessor:
             Dictionary with masking results
         """
         try:
-            # Find input document - support multiple extensions
-            supported_extensions = ['*.pdf', '*.docx', '*.txt']
-            input_files = []
-            for ext in supported_extensions:
-                input_files.extend(list(UPLOADS_DIR.glob(f"{document_id}_{ext}")))
+            # Find input document - look for files that start with document_id_
+            input_files = list(UPLOADS_DIR.glob(f"{document_id}_*"))
+            
+            # Filter to only include supported file types
+            supported_extensions = ['.pdf', '.docx', '.txt']
+            input_files = [f for f in input_files if f.suffix.lower() in supported_extensions]
             
             if not input_files:
                 raise ValueError(f"Document file not found for document_id: {document_id}")
@@ -354,11 +407,19 @@ class SimpleDocumentProcessor:
             # Run bert_pii_masker.py
             current_app.logger.info(f"Applying PII masking: {masking_input} -> {output_path}")
             
+            # Use absolute paths to ensure files are found correctly
+            absolute_masking_input = Path(masking_input).resolve()
+            absolute_output_path = output_path.resolve()
+            absolute_config_path = config_path.resolve()
+            
+            current_app.logger.info(f"Absolute masking input: {absolute_masking_input}")
+            current_app.logger.info(f"Input exists: {absolute_masking_input.exists()}")
+            
             result = subprocess.run([
                 'python', 'bert_pii_masker.py',
-                str(masking_input),
-                str(output_path),
-                str(config_path)
+                str(absolute_masking_input),
+                str(absolute_output_path),
+                str(absolute_config_path)
             ], capture_output=True, text=True, cwd=current_app.root_path)
             
             if result.returncode != 0:
@@ -673,6 +734,139 @@ class SimpleDocumentProcessor:
         except Exception as e:
             raise ValueError(f"Force cleanup failed: {str(e)}")
 
+    def generate_pii_config_bulk(self, document_ids: List[str]) -> Dict[str, Any]:
+        """
+        Generate PII configuration for multiple documents using parallel processing.
+        
+        Args:
+            document_ids: List of document IDs
+            
+        Returns:
+            Dictionary with bulk config generation results
+        """
+        try:
+            successful_configs = []
+            failed_configs = []
+            
+            # Capture current Flask app context for worker threads
+            app = current_app._get_current_object()
+            
+            def generate_config_with_context(document_id: str):
+                """Wrapper function that preserves Flask app context."""
+                with app.app_context():
+                    return self.generate_pii_config(document_id)
+            
+            # Use ThreadPoolExecutor for parallel PII detection
+            max_workers = min(len(document_ids), 5)  # Limit concurrent workers to prevent overload
+            current_app.logger.info(f"Starting parallel PII detection for {len(document_ids)} documents using {max_workers} workers")
+            
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all detection tasks with app context preservation
+                future_to_document_id = {
+                    executor.submit(generate_config_with_context, document_id): document_id 
+                    for document_id in document_ids
+                }
+                
+                # Process completed tasks as they finish
+                for future in as_completed(future_to_document_id):
+                    document_id = future_to_document_id[future]
+                    try:
+                        result = future.result()
+                        successful_configs.append({
+                            'document_id': document_id,
+                            'config_data': result['config_data'],
+                            'total_pii': result['total_pii'],
+                            'status': 'config_generated'
+                        })
+                        current_app.logger.info(f"Generated config for document: {document_id}")
+                    except Exception as e:
+                        failed_configs.append({
+                            'document_id': document_id,
+                            'error': str(e)
+                        })
+                        current_app.logger.error(f"Failed to generate config for {document_id}: {str(e)}")
+            
+            current_app.logger.info(f"Parallel PII detection completed: {len(successful_configs)} successful, {len(failed_configs)} failed")
+            
+            return {
+                'successful_configs': successful_configs,
+                'failed_configs': failed_configs,
+                'total_documents': len(document_ids),
+                'successful_count': len(successful_configs),
+                'failed_count': len(failed_configs),
+                'status': 'completed' if len(failed_configs) == 0 else 'partial_success'
+            }
+            
+        except Exception as e:
+            raise ValueError(f"Bulk config generation failed: {str(e)}")
+
+    def apply_masking_bulk(self, document_ids: List[str]) -> Dict[str, Any]:
+        """
+        Apply PII masking to multiple documents using parallel processing.
+        
+        Args:
+            document_ids: List of document IDs
+            
+        Returns:
+            Dictionary with bulk masking results
+        """
+        try:
+            successful_maskings = []
+            failed_maskings = []
+            
+            # Capture current Flask app context for worker threads
+            app = current_app._get_current_object()
+            
+            def apply_masking_with_context(document_id: str):
+                """Wrapper function that preserves Flask app context."""
+                with app.app_context():
+                    return self.apply_masking(document_id)
+            
+            # Use ThreadPoolExecutor for parallel PII masking
+            max_workers = min(len(document_ids), 4)  # Limit concurrent workers for masking (more resource intensive)
+            current_app.logger.info(f"Starting parallel PII masking for {len(document_ids)} documents using {max_workers} workers")
+            
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all masking tasks with app context preservation
+                future_to_document_id = {
+                    executor.submit(apply_masking_with_context, document_id): document_id 
+                    for document_id in document_ids
+                }
+                
+                # Process completed tasks as they finish
+                for future in as_completed(future_to_document_id):
+                    document_id = future_to_document_id[future]
+                    try:
+                        result = future.result()
+                        successful_maskings.append({
+                            'document_id': document_id,
+                            'masked_document_id': result['masked_document_id'],
+                            'output_filename': result['output_filename'],
+                            'file_size': result['file_size'],
+                            'status': 'masking_completed'
+                        })
+                        current_app.logger.info(f"Applied masking for document: {document_id}")
+                    except Exception as e:
+                        failed_maskings.append({
+                            'document_id': document_id,
+                            'error': str(e)
+                        })
+                        current_app.logger.error(f"Failed to apply masking for {document_id}: {str(e)}")
+            
+            current_app.logger.info(f"Parallel PII masking completed: {len(successful_maskings)} successful, {len(failed_maskings)} failed")
+            
+            return {
+                'successful_maskings': successful_maskings,
+                'failed_maskings': failed_maskings,
+                'total_documents': len(document_ids),
+                'successful_count': len(successful_maskings),
+                'failed_count': len(failed_maskings),
+                'status': 'completed' if len(failed_maskings) == 0 else 'partial_success'
+            }
+            
+        except Exception as e:
+            raise ValueError(f"Bulk masking failed: {str(e)}")
+
 
 # Initialize processor
 processor = SimpleDocumentProcessor()
@@ -682,13 +876,20 @@ processor = SimpleDocumentProcessor()
 
 @simple_processing_bp.route('/upload', methods=['POST'])
 def upload_document():
-    """Upload a PDF document."""
+    """Upload a PDF document (single or multiple files)."""
     try:
-        if 'file' not in request.files:
+        if 'file' not in request.files and 'files' not in request.files:
             return error_response('No file provided', 'FILE_REQUIRED')
         
-        file = request.files['file']
-        result = processor.upload_document(file)
+        # Check if single file or multiple files
+        if 'files' in request.files:
+            # Handle multiple files
+            files = request.files.getlist('files')
+            result = processor.upload_multiple_documents(files)
+        else:
+            # Handle single file (backward compatibility)
+            file = request.files['file']
+            result = processor.upload_document(file)
         
         return success_response(result)
         
@@ -697,6 +898,26 @@ def upload_document():
     except Exception as e:
         current_app.logger.error(f"Upload error: {str(e)}")
         return error_response('Upload failed', 'INTERNAL_ERROR')
+
+@simple_processing_bp.route('/upload/bulk', methods=['POST'])
+def upload_bulk_documents():
+    """Upload multiple PDF documents."""
+    try:
+        if 'files' not in request.files:
+            return error_response('No files provided', 'FILES_REQUIRED')
+        
+        files = request.files.getlist('files')
+        if not files or len(files) == 0:
+            return error_response('No files provided', 'FILES_REQUIRED')
+        
+        result = processor.upload_multiple_documents(files)
+        return success_response(result)
+        
+    except ValueError as e:
+        return error_response(str(e), 'UPLOAD_ERROR')
+    except Exception as e:
+        current_app.logger.error(f"Bulk upload error: {str(e)}")
+        return error_response('Bulk upload failed', 'INTERNAL_ERROR')
 
 
 @simple_processing_bp.route('/generate-config/<document_id>', methods=['POST'])
@@ -757,6 +978,50 @@ def apply_masking(document_id: str):
     except Exception as e:
         current_app.logger.error(f"Masking error: {str(e)}")
         return error_response('Masking failed', 'INTERNAL_ERROR')
+
+
+@simple_processing_bp.route('/generate-config/bulk', methods=['POST'])
+def generate_config_bulk():
+    """Generate PII configuration for multiple documents."""
+    try:
+        data = request.get_json()
+        if not data or 'document_ids' not in data:
+            return error_response('Document IDs required', 'DATA_REQUIRED')
+        
+        document_ids = data['document_ids']
+        if not isinstance(document_ids, list) or len(document_ids) == 0:
+            return error_response('Valid document IDs array required', 'INVALID_DATA')
+        
+        result = processor.generate_pii_config_bulk(document_ids)
+        return success_response(result)
+        
+    except ValueError as e:
+        return error_response(str(e), 'CONFIG_ERROR')
+    except Exception as e:
+        current_app.logger.error(f"Bulk config generation error: {str(e)}")
+        return error_response('Bulk config generation failed', 'INTERNAL_ERROR')
+
+
+@simple_processing_bp.route('/apply-masking/bulk', methods=['POST'])
+def apply_masking_bulk():
+    """Apply PII masking to multiple documents."""
+    try:
+        data = request.get_json()
+        if not data or 'document_ids' not in data:
+            return error_response('Document IDs required', 'DATA_REQUIRED')
+        
+        document_ids = data['document_ids']
+        if not isinstance(document_ids, list) or len(document_ids) == 0:
+            return error_response('Valid document IDs array required', 'INVALID_DATA')
+        
+        result = processor.apply_masking_bulk(document_ids)
+        return success_response(result)
+        
+    except ValueError as e:
+        return error_response(str(e), 'MASKING_ERROR')
+    except Exception as e:
+        current_app.logger.error(f"Bulk masking error: {str(e)}")
+        return error_response('Bulk masking failed', 'INTERNAL_ERROR')
 
 
 @simple_processing_bp.route('/download/<document_id>', methods=['GET'])

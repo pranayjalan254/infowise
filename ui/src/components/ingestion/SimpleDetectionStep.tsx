@@ -28,6 +28,7 @@ export function SimpleDetectionStep({
 }: SimpleDetectionStepProps) {
   const [isDetecting, setIsDetecting] = useState(false);
   const [detectionProgress, setDetectionProgress] = useState(0);
+  const [detectionStatus, setDetectionStatus] = useState<string>("");
   const [detectionResults, setDetectionResults] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [pdfError, setPdfError] = useState(false);
@@ -45,22 +46,37 @@ export function SimpleDetectionStep({
 
     setIsDetecting(true);
     setDetectionProgress(0);
+    setDetectionStatus("Initializing PII detection...");
     setError(null);
 
     try {
       const documentId = uploadedFiles[0].id; // Use first (and only) uploaded file
 
-      // Simulate progress
-      const progressInterval = setInterval(() => {
-        setDetectionProgress((prev) => Math.min(prev + 2, 90));
-      }, 100);
+      setDetectionStatus("Analyzing document structure...");
+      setDetectionProgress(20);
+
+      // Small delay to show status update
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      setDetectionStatus("Extracting text content...");
+      setDetectionProgress(40);
+
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      setDetectionStatus("Running PII detection models...");
+      setDetectionProgress(60);
 
       // Generate PII configuration using the simple API
       console.log("Starting PII detection for document:", documentId);
       const response = await simpleProcessingApi.generateConfig(documentId);
 
-      clearInterval(progressInterval);
+      setDetectionStatus("Processing detection results...");
+      setDetectionProgress(90);
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
       setDetectionProgress(100);
+      setDetectionStatus("Detection completed successfully!");
 
       if (response.status === "success" && response.data) {
         console.log("PII detection completed:", response.data);
@@ -98,6 +114,7 @@ export function SimpleDetectionStep({
     } catch (error) {
       console.error("Detection error:", error);
       setDetectionProgress(100);
+      setDetectionStatus("Detection failed");
       setError(error instanceof Error ? error.message : "Detection failed");
 
       toast({
@@ -295,11 +312,12 @@ export function SimpleDetectionStep({
         >
           <div className="text-center">
             <p className="font-medium">Analyzing document for PII...</p>
-            <p className="text-sm text-muted-foreground">
-              This may take a few moments
-            </p>
+            <p className="text-sm text-muted-foreground">{detectionStatus}</p>
           </div>
           <Progress value={detectionProgress} className="w-full" />
+          <p className="text-xs text-center text-muted-foreground">
+            {detectionProgress}% complete
+          </p>
         </motion.div>
       )}
 
