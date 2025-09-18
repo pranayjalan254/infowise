@@ -733,21 +733,25 @@ export const simpleProcessingApi = {
       formData.append("files", file);
     });
 
-    return fetch(`${API_BASE_URL}/simple/upload/bulk`, {
+    return fetch(`${API_BASE_URL}/simple/upload`, {
       method: "POST",
       body: formData,
     }).then(async (response) => {
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.error?.message || "Bulk upload failed");
+        throw new Error(data.error?.message || "Upload failed");
       }
       return data;
     });
   },
 
   generateConfig: (documentId: string) =>
-    fetch(`${API_BASE_URL}/simple/generate-config/${documentId}`, {
+    fetch(`${API_BASE_URL}/simple/generate-config`, {
       method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ document_ids: [documentId] }),
     }).then(async (response) => {
       const data = await response.json();
       if (!response.ok) {
@@ -757,7 +761,7 @@ export const simpleProcessingApi = {
     }),
 
   generateConfigBulk: (documentIds: string[]) =>
-    fetch(`${API_BASE_URL}/simple/generate-config/bulk`, {
+    fetch(`${API_BASE_URL}/simple/generate-config`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -798,8 +802,12 @@ export const simpleProcessingApi = {
     }),
 
   applyMasking: (documentId: string) =>
-    fetch(`${API_BASE_URL}/simple/apply-masking/${documentId}`, {
+    fetch(`${API_BASE_URL}/simple/apply-masking`, {
       method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ document_ids: [documentId] }),
     }).then(async (response) => {
       const data = await response.json();
       if (!response.ok) {
@@ -809,7 +817,7 @@ export const simpleProcessingApi = {
     }),
 
   applyMaskingBulk: (documentIds: string[]) =>
-    fetch(`${API_BASE_URL}/simple/apply-masking/bulk`, {
+    fetch(`${API_BASE_URL}/simple/apply-masking`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -849,10 +857,7 @@ export const simpleProcessingApi = {
     `${API_BASE_URL}/simple/preview-masked/${documentId}`,
 
   // New MongoDB-based download endpoints
-  downloadFromMongo: (
-    documentId: string,
-    status: "uploaded" | "masked" = "masked"
-  ) =>
+  downloadFromMongo: (documentId: string, status: "masked") =>
     fetch(
       `${API_BASE_URL}/simple/download-from-mongo/${documentId}?status=${status}`
     ).then((response) => {

@@ -495,13 +495,6 @@ export default function LandingPage() {
             <h2 className="text-3xl md:text-4xl font-bold text-display text-foreground mb-6">
               Integrate PII Protection
             </h2>
-            <p className="text-xl text-muted-foreground max-w-3xl mx-auto mb-8">
-              Comprehensive REST API for automatic PII detection and masking
-              using advanced AI. Supports 25+ PII types including names,
-              financial data, technical identifiers, and location information.
-              Upload a document, get back a masked version with all sensitive
-              data protected.
-            </p>
           </motion.div>
 
           <div className="grid lg:grid-cols-2 gap-12 items-start">
@@ -527,9 +520,13 @@ export default function LandingPage() {
                     <div className="bg-gray-900 dark:bg-gray-800 p-3 rounded-lg font-mono text-sm">
                       <span className="text-green-400">POST</span>{" "}
                       <span className="text-white">
-                        /api/v1/simple/process-document
+                        /api/v1/simple/process-documents
                       </span>
                     </div>
+                    <p className="text-sm text-muted-foreground mt-2">
+                      Unified endpoint supporting both single and multiple
+                      document processing
+                    </p>
                   </div>
 
                   <div>
@@ -539,12 +536,16 @@ export default function LandingPage() {
                     <ul className="space-y-2 text-muted-foreground">
                       <li className="flex items-start">
                         <CheckCircle className="h-4 w-4 mr-2 text-green-500 mt-0.5 flex-shrink-0" />
+                        Bulk document processing with parallel processing
+                      </li>
+                      <li className="flex items-start">
+                        <CheckCircle className="h-4 w-4 mr-2 text-green-500 mt-0.5 flex-shrink-0" />
                         Advanced PII detection (25+ types: financial, medical,
                         technical, personal)
                       </li>
                       <li className="flex items-start">
                         <CheckCircle className="h-4 w-4 mr-2 text-green-500 mt-0.5 flex-shrink-0" />
-                        Hybrid AI approach (LLM + BERT NER + regex patterns)
+                        Hybrid AI/ML approach (LLM + BERT NER + regex patterns)
                       </li>
                       <li className="flex items-start">
                         <CheckCircle className="h-4 w-4 mr-2 text-green-500 mt-0.5 flex-shrink-0" />
@@ -552,12 +553,12 @@ export default function LandingPage() {
                       </li>
                       <li className="flex items-start">
                         <CheckCircle className="h-4 w-4 mr-2 text-green-500 mt-0.5 flex-shrink-0" />
-                        Support for PDF, DOCX, TXT files
+                        Support for PDF, DOCX, TXT, CSV, image files
                       </li>
 
                       <li className="flex items-start">
                         <CheckCircle className="h-4 w-4 mr-2 text-green-500 mt-0.5 flex-shrink-0" />
-                        Does not store any data
+                        Automatic cleanup and memory optimization
                       </li>
                     </ul>
                   </div>
@@ -701,32 +702,6 @@ export default function LandingPage() {
                       </div>
                     </div>
                   </div>
-
-                  <div>
-                    <h4 className="font-semibold text-foreground mb-2">
-                      Response Headers
-                    </h4>
-                    <div className="text-sm text-muted-foreground space-y-1">
-                      <div>
-                        <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded">
-                          X-PII-Count
-                        </code>
-                        : Number of PII entities masked
-                      </div>
-                      <div>
-                        <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded">
-                          X-Document-ID
-                        </code>
-                        : Unique processing identifier
-                      </div>
-                      <div>
-                        <code className="bg-gray-100 dark:bg-gray-800 px-1 py-0.5 rounded">
-                          X-Processing-Status
-                        </code>
-                        : Operation status
-                      </div>
-                    </div>
-                  </div>
                 </CardContent>
               </Card>
             </motion.div>
@@ -759,10 +734,16 @@ export default function LandingPage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => {
-                            navigator.clipboard
-                              .writeText(`curl -X POST http://localhost:5000/api/v1/simple/process-document \\
+                            navigator.clipboard.writeText(`# Single document
+curl -X POST http://localhost:5000/api/v1/simple/process-documents \\
   -F "document=@your_document.pdf" \\
-  -o masked_document.pdf`);
+  -o masked_document.pdf
+
+# Multiple documents
+curl -X POST http://localhost:5000/api/v1/simple/process-documents \\
+  -F "documents=@document1.pdf" \\
+  -F "documents=@document2.docx" \\
+  -F "documents=@document3.txt"`);
                           }}
                         >
                           <Copy className="h-4 w-4" />
@@ -770,9 +751,16 @@ export default function LandingPage() {
                       </div>
                       <div className="bg-gray-900 dark:bg-gray-800 p-4 rounded-lg overflow-x-auto">
                         <pre className="text-sm text-gray-300">
-                          {`curl -X POST http://localhost:5000/api/v1/simple/process-document \\
+                          {`# Single document
+curl -X POST http://localhost:5000/api/v1/simple/process-documents \\
   -F "document=@your_document.pdf" \\
-  -o masked_document.pdf`}
+  -o masked_document.pdf
+
+# Multiple documents
+curl -X POST http://localhost:5000/api/v1/simple/process-documents \\
+  -F "documents=@document1.pdf" \\
+  -F "documents=@document2.docx" \\
+  -F "documents=@document3.txt"`}
                         </pre>
                       </div>
                     </TabsContent>
@@ -784,28 +772,35 @@ export default function LandingPage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => {
-                            navigator.clipboard
-                              .writeText(`const formData = new FormData();
+                            navigator.clipboard.writeText(`// Single document
+const formData = new FormData();
 formData.append('document', fileInput.files[0]);
 
-fetch('/api/v1/simple/process-document', {
+fetch('/api/v1/simple/process-documents', {
   method: 'POST',
   body: formData
 })
-.then(response => {
-  if (response.ok) {
-    const piiCount = response.headers.get('X-PII-Count');
-    console.log(\`Masked \${piiCount} PII entities\`);
-    return response.blob();
-  }
-  throw new Error('Processing failed');
+.then(response => response.json())
+.then(result => {
+  console.log('Processing completed:', result.data);
+  result.data.processed_documents.forEach(doc => {
+    console.log(\`Document: \${doc.original_filename}, PII Count: \${doc.pii_count}\`);
+  });
+});
+
+// Multiple documents
+const formData = new FormData();
+Array.from(fileInput.files).forEach(file => {
+  formData.append('documents', file);
+});
+
+fetch('/api/v1/simple/process-documents', {
+  method: 'POST',
+  body: formData
 })
-.then(blob => {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'masked_document.pdf';
-  a.click();
+.then(response => response.json())
+.then(result => {
+  console.log(\`Successfully processed \${result.data.processed_documents.length} documents\`);
 });`);
                           }}
                         >
@@ -814,27 +809,35 @@ fetch('/api/v1/simple/process-document', {
                       </div>
                       <div className="bg-gray-900 dark:bg-gray-800 p-4 rounded-lg overflow-x-auto">
                         <pre className="text-sm text-gray-300">
-                          {`const formData = new FormData();
+                          {`// Single document
+const formData = new FormData();
 formData.append('document', fileInput.files[0]);
 
-fetch('/api/v1/simple/process-document', {
+fetch('/api/v1/simple/process-documents', {
   method: 'POST',
   body: formData
 })
-.then(response => {
-  if (response.ok) {
-    const piiCount = response.headers.get('X-PII-Count');
-    console.log(\`Masked \${piiCount} PII entities\`);
-    return response.blob();
-  }
-  throw new Error('Processing failed');
+.then(response => response.json())
+.then(result => {
+  console.log('Processing completed:', result.data);
+  result.data.processed_documents.forEach(doc => {
+    console.log(\`Document: \${doc.original_filename}, PII Count: \${doc.pii_count}\`);
+  });
+});
+
+// Multiple documents
+const formData = new FormData();
+Array.from(fileInput.files).forEach(file => {
+  formData.append('documents', file);
+});
+
+fetch('/api/v1/simple/process-documents', {
+  method: 'POST',
+  body: formData
 })
-.then(blob => {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'masked_document.pdf';
-  a.click();
+.then(response => response.json())
+.then(result => {
+  console.log(\`Successfully processed \${result.data.processed_documents.length} documents\`);
 });`}
                         </pre>
                       </div>
@@ -849,19 +852,34 @@ fetch('/api/v1/simple/process-document', {
                           onClick={() => {
                             navigator.clipboard.writeText(`import requests
 
-url = "http://localhost:5000/api/v1/simple/process-document"
+# Single document processing
+url = "http://localhost:5000/api/v1/simple/process-documents"
 files = {"document": open("your_document.pdf", "rb")}
 
 response = requests.post(url, files=files)
 
 if response.status_code == 200:
-    pii_count = response.headers.get('X-PII-Count', '0')
-    print(f"Successfully masked {pii_count} PII entities")
+    result = response.json()
+    print(f"Processing completed: {result['message']}")
     
-    with open("masked_document.pdf", "wb") as f:
-        f.write(response.content)
+    for doc in result['data']['processed_documents']:
+        print(f"Document: {doc['original_filename']}")
+        print(f"PII Count: {doc['pii_count']}")
+        print(f"Download: {doc['masked_filename']}")
 else:
-    print("Processing failed:", response.text)`);
+    print("Processing failed:", response.text)
+
+# Multiple documents processing
+files = [
+    ("documents", open("document1.pdf", "rb")),
+    ("documents", open("document2.docx", "rb")),
+    ("documents", open("document3.txt", "rb"))
+]
+
+response = requests.post(url, files=files)
+if response.status_code == 200:
+    result = response.json()
+    print(f"Processed {len(result['data']['processed_documents'])} documents successfully")`);
                           }}
                         >
                           <Copy className="h-4 w-4" />
@@ -871,23 +889,89 @@ else:
                         <pre className="text-sm text-gray-300">
                           {`import requests
 
-url = "http://localhost:5000/api/v1/simple/process-document"
+# Single document processing
+url = "http://localhost:5000/api/v1/simple/process-documents"
 files = {"document": open("your_document.pdf", "rb")}
 
 response = requests.post(url, files=files)
 
 if response.status_code == 200:
-    pii_count = response.headers.get('X-PII-Count', '0')
-    print(f"Successfully masked {pii_count} PII entities")
+    result = response.json()
+    print(f"Processing completed: {result['message']}")
     
-    with open("masked_document.pdf", "wb") as f:
-        f.write(response.content)
+    for doc in result['data']['processed_documents']:
+        print(f"Document: {doc['original_filename']}")
+        print(f"PII Count: {doc['pii_count']}")
+        print(f"Download: {doc['masked_filename']}")
 else:
-    print("Processing failed:", response.text)`}
+    print("Processing failed:", response.text)
+
+# Multiple documents processing
+files = [
+    ("documents", open("document1.pdf", "rb")),
+    ("documents", open("document2.docx", "rb")),
+    ("documents", open("document3.txt", "rb"))
+]
+
+response = requests.post(url, files=files)
+if response.status_code == 200:
+    result = response.json()
+    print(f"Processed {len(result['data']['processed_documents'])} documents successfully")`}
                         </pre>
                       </div>
                     </TabsContent>
                   </Tabs>
+                </CardContent>
+              </Card>
+              <Card className="neumorphic-card max-w-4xl mx-auto mt-8">
+                <CardHeader>
+                  <CardTitle className="text-xl font-semibold text-center">
+                    Response Format
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-sm text-muted-foreground space-y-4">
+                    <div className="bg-gray-900 dark:bg-gray-800 p-4 rounded-lg text-xs font-mono overflow-x-auto">
+                      <div className="text-green-400 mb-2">
+                        JSON Response Structure:
+                      </div>
+                      <div className="text-gray-300">
+                        ├── message: "Processing completed"
+                        <br />
+                        ├── data:
+                        <br />
+                        │ ├── processed_documents: []
+                        <br />│ ├── download_links: {"{}"}
+                        <br />
+                        │ └── overall_status: "completed"
+                        <br />
+                        └── status: "success"
+                      </div>
+                    </div>
+                    <div className="grid gap-3">
+                      <div>
+                        <strong className="text-foreground">
+                          processed_documents
+                        </strong>
+                        : Array of successfully processed documents with PII
+                        counts, file sizes, and processing status
+                      </div>
+                      <div>
+                        <strong className="text-foreground">
+                          download_links
+                        </strong>
+                        : Direct URLs for downloading masked documents,
+                        previewing originals and results
+                      </div>
+                      <div>
+                        <strong className="text-foreground">
+                          overall_status
+                        </strong>
+                        : "completed", "partial_success", or "failed" based on
+                        processing results
+                      </div>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             </motion.div>

@@ -875,22 +875,24 @@ processor = SimpleDocumentProcessor()
 # API Endpoints
 
 @simple_processing_bp.route('/upload', methods=['POST'])
-def upload_document():
-    """Upload a PDF document (single or multiple files)."""
+def upload_documents():
+    """Upload documents (single or multiple files)."""
     try:
-        if 'file' not in request.files and 'files' not in request.files:
+        files = []
+        
+        # Handle both 'file' (single) and 'files' (multiple) fields
+        if 'files' in request.files:
+            files = request.files.getlist('files')
+        elif 'file' in request.files:
+            files = [request.files['file']]
+        else:
             return error_response('No file provided', 'FILE_REQUIRED')
         
-        # Check if single file or multiple files
-        if 'files' in request.files:
-            # Handle multiple files
-            files = request.files.getlist('files')
-            result = processor.upload_multiple_documents(files)
-        else:
-            # Handle single file (backward compatibility)
-            file = request.files['file']
-            result = processor.upload_document(file)
+        if not files or len(files) == 0:
+            return error_response('No files provided', 'FILES_REQUIRED')
         
+        # Always use the bulk upload method (works for single files too)
+        result = processor.upload_multiple_documents(files)
         return success_response(result)
         
     except ValueError as e:
@@ -899,32 +901,25 @@ def upload_document():
         current_app.logger.error(f"Upload error: {str(e)}")
         return error_response('Upload failed', 'INTERNAL_ERROR')
 
-@simple_processing_bp.route('/upload/bulk', methods=['POST'])
-def upload_bulk_documents():
-    """Upload multiple PDF documents."""
-    try:
-        if 'files' not in request.files:
-            return error_response('No files provided', 'FILES_REQUIRED')
-        
-        files = request.files.getlist('files')
-        if not files or len(files) == 0:
-            return error_response('No files provided', 'FILES_REQUIRED')
-        
-        result = processor.upload_multiple_documents(files)
-        return success_response(result)
-        
-    except ValueError as e:
-        return error_response(str(e), 'UPLOAD_ERROR')
-    except Exception as e:
-        current_app.logger.error(f"Bulk upload error: {str(e)}")
-        return error_response('Bulk upload failed', 'INTERNAL_ERROR')
 
-
-@simple_processing_bp.route('/generate-config/<document_id>', methods=['POST'])
-def generate_config(document_id: str):
-    """Generate PII configuration for a document."""
+@simple_processing_bp.route('/generate-config', methods=['POST'])
+def generate_config():
+    """Generate PII configuration for documents (single or multiple)."""
     try:
-        result = processor.generate_pii_config(document_id)
+        data = request.get_json()
+        if not data or 'document_ids' not in data:
+            return error_response('Document IDs required', 'DATA_REQUIRED')
+        
+        document_ids = data['document_ids']
+        if not isinstance(document_ids, list):
+            # Convert single document_id to list for consistency
+            document_ids = [document_ids]
+        
+        if len(document_ids) == 0:
+            return error_response('Valid document IDs required', 'INVALID_DATA')
+        
+        # Always use bulk processing (works for single documents too)
+        result = processor.generate_pii_config_bulk(document_ids)
         return success_response(result)
         
     except ValueError as e:
@@ -966,11 +961,24 @@ def update_config(document_id: str):
         return error_response('Failed to update config', 'INTERNAL_ERROR')
 
 
-@simple_processing_bp.route('/apply-masking/<document_id>', methods=['POST'])
-def apply_masking(document_id: str):
-    """Apply PII masking to a document."""
+@simple_processing_bp.route('/apply-masking', methods=['POST'])
+def apply_masking():
+    """Apply PII masking to documents (single or multiple)."""
     try:
-        result = processor.apply_masking(document_id)
+        data = request.get_json()
+        if not data or 'document_ids' not in data:
+            return error_response('Document IDs required', 'DATA_REQUIRED')
+        
+        document_ids = data['document_ids']
+        if not isinstance(document_ids, list):
+            # Convert single document_id to list for consistency
+            document_ids = [document_ids]
+        
+        if len(document_ids) == 0:
+            return error_response('Valid document IDs required', 'INVALID_DATA')
+        
+        # Always use bulk processing (works for single documents too)
+        result = processor.apply_masking_bulk(document_ids)
         return success_response(result)
         
     except ValueError as e:
@@ -982,46 +990,14 @@ def apply_masking(document_id: str):
 
 @simple_processing_bp.route('/generate-config/bulk', methods=['POST'])
 def generate_config_bulk():
-    """Generate PII configuration for multiple documents."""
-    try:
-        data = request.get_json()
-        if not data or 'document_ids' not in data:
-            return error_response('Document IDs required', 'DATA_REQUIRED')
-        
-        document_ids = data['document_ids']
-        if not isinstance(document_ids, list) or len(document_ids) == 0:
-            return error_response('Valid document IDs array required', 'INVALID_DATA')
-        
-        result = processor.generate_pii_config_bulk(document_ids)
-        return success_response(result)
-        
-    except ValueError as e:
-        return error_response(str(e), 'CONFIG_ERROR')
-    except Exception as e:
-        current_app.logger.error(f"Bulk config generation error: {str(e)}")
-        return error_response('Bulk config generation failed', 'INTERNAL_ERROR')
+    """Generate PII configuration for multiple documents (legacy endpoint - redirects to unified endpoint)."""
+    return generate_config()
 
 
 @simple_processing_bp.route('/apply-masking/bulk', methods=['POST'])
 def apply_masking_bulk():
-    """Apply PII masking to multiple documents."""
-    try:
-        data = request.get_json()
-        if not data or 'document_ids' not in data:
-            return error_response('Document IDs required', 'DATA_REQUIRED')
-        
-        document_ids = data['document_ids']
-        if not isinstance(document_ids, list) or len(document_ids) == 0:
-            return error_response('Valid document IDs array required', 'INVALID_DATA')
-        
-        result = processor.apply_masking_bulk(document_ids)
-        return success_response(result)
-        
-    except ValueError as e:
-        return error_response(str(e), 'MASKING_ERROR')
-    except Exception as e:
-        current_app.logger.error(f"Bulk masking error: {str(e)}")
-        return error_response('Bulk masking failed', 'INTERNAL_ERROR')
+    """Apply PII masking to multiple documents (legacy endpoint - redirects to unified endpoint)."""
+    return apply_masking()
 
 
 @simple_processing_bp.route('/download/<document_id>', methods=['GET'])
@@ -1339,130 +1315,185 @@ def force_cleanup_document_data(document_id: str):
 # SIMPLIFIED API ENDPOINTS FOR EXTERNAL USE
 # ============================================================================
 
-@simple_processing_bp.route('/process-document', methods=['POST'])
-def process_document_complete():
+@simple_processing_bp.route('/process-documents', methods=['POST'])
+def process_documents():
     """
-    Simplified API endpoint that handles the complete PII detection and masking pipeline.
+    Unified API endpoint that handles complete PII detection and masking pipeline for single or multiple documents.
     
     This endpoint combines all the steps into one seamless process:
-    1. Upload document
-    2. Generate PII detection configuration with suggested strategies
-    3. Apply masking using suggested strategies
-    4. Return the masked document
+    1. Upload documents (single or multiple)
+    2. Generate PII detection configurations with suggested strategies (parallel processing)
+    3. Apply masking using suggested strategies (parallel processing)
+    4. Return processing summary with download links
     
     Supports: PDF, DOCX, TXT files
     
     Request:
-        - Multipart form data with 'document' file
+        - Multipart form data with 'documents' files (single file or array)
+        - Also supports 'document' for backward compatibility
         
     Response:
-        - Success: Returns the masked document as a file download
-        - Error: JSON with error details
+        - JSON response with processing summary and download information
     
-    Usage Example:
-        curl -X POST http://localhost:5000/api/v1/simple/process-document \
-             -F "document=@your_document.pdf" \
-             -o masked_document.pdf
+    Usage Examples:
+        # Single document
+        curl -X POST http://localhost:5000/api/v1/simple/process-documents \
+             -F "document=@your_document.pdf"
+             
+        # Multiple documents
+        curl -X POST http://localhost:5000/api/v1/simple/process-documents \
+             -F "documents=@document1.pdf" \
+             -F "documents=@document2.docx" \
+             -F "documents=@document3.txt"
     """
     try:
-        # Validate request
-        if 'document' not in request.files:
-            return error_response('No document file provided', 'MISSING_FILE')
+        # Handle both single and multiple file uploads
+        files = []
         
-        file = request.files['document']
-        if file.filename == '':
-            return error_response('No file selected', 'NO_FILE_SELECTED')
+        if 'documents' in request.files:
+            files = request.files.getlist('documents')
+        elif 'document' in request.files:
+            files = [request.files['document']]
+        else:
+            return error_response('No document files provided', 'MISSING_FILES')
         
-        current_app.logger.info(f"Starting complete document processing for: {file.filename}")
+        if not files or len(files) == 0:
+            return error_response('No files selected', 'NO_FILES_SELECTED')
         
-        # Step 1: Upload document
-        current_app.logger.info("Step 1: Uploading document...")
-        upload_result = processor.upload_document(file)
-        document_id = upload_result['document_id']
+        current_app.logger.info(f"Starting document processing for {len(files)} file(s)")
         
-        current_app.logger.info(f"Document uploaded with ID: {document_id}")
+        # Step 1: Upload all documents
+        current_app.logger.info("Step 1: Uploading documents...")
+        upload_result = processor.upload_multiple_documents(files)
+        
+        if upload_result['successful_uploads'] == 0:
+            return error_response('All document uploads failed', 'ALL_UPLOADS_FAILED')
+        
+        # Get document IDs from successful uploads
+        document_ids = [doc['document_id'] for doc in upload_result['uploaded_documents']]
+        current_app.logger.info(f"Documents uploaded successfully: {len(document_ids)} file(s)")
         
         try:
-            # Step 2: Generate PII detection config with suggested strategies
-            current_app.logger.info("Step 2: Generating PII detection configuration...")
-            config_result = processor.generate_pii_config(document_id)
+            # Step 2: Generate PII detection configs with parallel processing
+            current_app.logger.info("Step 2: Generating PII detection configurations...")
+            config_result = processor.generate_pii_config_bulk(document_ids)
             
-            current_app.logger.info(f"PII detection completed. Found {config_result['total_pii']} PII entities")
+            if config_result['successful_count'] == 0:
+                raise ValueError("All PII detection configurations failed")
             
-            # Step 3: Apply masking using suggested strategies (no manual intervention)
-            current_app.logger.info("Step 3: Applying PII masking with suggested strategies...")
-            masking_result = processor.apply_masking(document_id)
+            # Get document IDs that successfully generated configs
+            successful_config_document_ids = [config['document_id'] for config in config_result['successful_configs']]
+            current_app.logger.info(f"PII detection completed for {len(successful_config_document_ids)} document(s)")
             
-            current_app.logger.info("PII masking completed successfully")
+            # Step 3: Apply masking with parallel processing
+            current_app.logger.info("Step 3: Applying PII masking...")
+            masking_result = processor.apply_masking_bulk(successful_config_document_ids)
             
-            # Step 4: Return the masked document
-            current_app.logger.info("Step 4: Preparing masked document for download...")
+            current_app.logger.info(f"PII masking completed for {masking_result['successful_count']} document(s)")
             
-            # Find the masked document
-            supported_extensions = ['*.pdf', '*.docx', '*.txt']
-            masked_files = []
-            for ext in supported_extensions:
-                masked_files.extend(list(RESULTS_DIR.glob(f"{document_id}_masked.{ext.replace('*.', '')}")))
+            # Step 4: Prepare response with processing summary
+            current_app.logger.info("Step 4: Preparing processing summary...")
             
-            if not masked_files:
-                raise ValueError("Masked document not found")
-            
-            masked_file = masked_files[0]
-            original_filename = upload_result.get('filename', 'document')
-            
-            # Create a meaningful filename for the masked document
-            name_parts = original_filename.rsplit('.', 1)
-            if len(name_parts) == 2:
-                masked_filename = f"{name_parts[0]}_masked.{name_parts[1]}"
-            else:
-                masked_filename = f"{original_filename}_masked.pdf"
-            
-            # Prepare response with metadata
-            response_headers = {
-                'X-Document-ID': document_id,
-                'X-PII-Count': str(config_result['total_pii']),
-                'X-Processing-Status': 'completed',
-                'X-Original-Filename': original_filename
+            # Create detailed processing summary
+            processing_summary = {
+                'total_files_submitted': len(files),
+                'upload_summary': {
+                    'successful_uploads': upload_result['successful_uploads'],
+                    'failed_uploads': upload_result['failed_count'],
+                    'upload_failures': upload_result['failed_uploads']
+                },
+                'detection_summary': {
+                    'successful_detections': config_result['successful_count'],
+                    'failed_detections': config_result['failed_count'],
+                    'detection_failures': config_result['failed_configs']
+                },
+                'masking_summary': {
+                    'successful_maskings': masking_result['successful_count'],
+                    'failed_maskings': masking_result['failed_count'],
+                    'masking_failures': masking_result['failed_maskings']
+                },
+                'processed_documents': [],
+                'download_links': {}
             }
             
-            # Create the file response
-            response = send_file(
-                masked_file,
-                as_attachment=True,
-                download_name=masked_filename,
-                mimetype='application/octet-stream'
-            )
-            
-            # Add custom headers
-            for header, value in response_headers.items():
-                response.headers[header] = value
-            
-            # Automatically cleanup intermediate files after successful processing
-            try:
-                # Keep only the final masked document, clean up intermediate files
-                current_app.logger.info(f"Auto-cleanup: Removing intermediate files for document {document_id}")
-                # Clean up uploads and configs, but keep the result
-                upload_files = list(UPLOADS_DIR.glob(f"{document_id}_*"))
-                config_files = list(CONFIGS_DIR.glob(f"{document_id}_*"))
+            # Add information about successfully processed documents
+            for masking in masking_result['successful_maskings']:
+                document_id = masking['document_id']
                 
-                for file_to_remove in upload_files + config_files:
-                    try:
-                        file_to_remove.unlink()
-                        current_app.logger.debug(f"Removed intermediate file: {file_to_remove}")
-                    except Exception as e:
-                        current_app.logger.warning(f"Failed to remove {file_to_remove}: {e}")
-                        
-            except Exception as cleanup_error:
-                current_app.logger.warning(f"Auto-cleanup warning for {document_id}: {cleanup_error}")
+                # Find the corresponding upload and config info
+                upload_info = next((doc for doc in upload_result['uploaded_documents'] if doc['document_id'] == document_id), None)
+                config_info = next((config for config in config_result['successful_configs'] if config['document_id'] == document_id), None)
+                
+                if upload_info and config_info:
+                    processed_doc = {
+                        'document_id': document_id,
+                        'original_filename': upload_info['filename'],
+                        'file_size': upload_info['size'],
+                        'pii_count': config_info['total_pii'],
+                        'masked_filename': masking['output_filename'],
+                        'masked_file_size': masking['file_size'],
+                        'status': 'completed'
+                    }
+                    processing_summary['processed_documents'].append(processed_doc)
+                    
+                    # Add download link
+                    processing_summary['download_links'][document_id] = {
+                        'masked_document': f"/api/v1/simple/download/{document_id}",
+                        'preview_original': f"/api/v1/simple/preview/{document_id}",
+                        'preview_masked': f"/api/v1/simple/preview-masked/{document_id}"
+                    }
             
-            current_app.logger.info(f"Complete document processing finished successfully for document {document_id}")
-            return response
+            # Automatically cleanup intermediate files for successfully processed documents
+            try:
+                current_app.logger.info("Auto-cleanup: Removing intermediate files for processed documents")
+                for document_id in [doc['document_id'] for doc in processing_summary['processed_documents']]:
+                    # Clean up uploads and configs, but keep the results
+                    upload_files = list(UPLOADS_DIR.glob(f"{document_id}_*"))
+                    config_files = list(CONFIGS_DIR.glob(f"{document_id}_*"))
+                    
+                    for file_to_remove in upload_files + config_files:
+                        try:
+                            file_to_remove.unlink()
+                            current_app.logger.debug(f"Removed intermediate file: {file_to_remove}")
+                        except Exception as e:
+                            current_app.logger.warning(f"Failed to remove {file_to_remove}: {e}")
+                            
+            except Exception as cleanup_error:
+                current_app.logger.warning(f"Auto-cleanup warning: {cleanup_error}")
+            
+            # Determine overall status
+            if masking_result['successful_count'] == len(files):
+                overall_status = 'completed'
+                message = f'All {len(files)} document(s) processed successfully'
+            elif masking_result['successful_count'] > 0:
+                overall_status = 'partial_success'
+                message = f'Processed {masking_result["successful_count"]} out of {len(files)} document(s)'
+            else:
+                overall_status = 'failed'
+                message = 'No documents were successfully processed'
+            
+            processing_summary['overall_status'] = overall_status
+            processing_summary['message'] = message
+            
+            # For single document, also include direct file response headers for backward compatibility
+            if len(files) == 1 and masking_result['successful_count'] == 1:
+                processed_doc = processing_summary['processed_documents'][0]
+                processing_summary['single_document_response'] = {
+                    'document_id': processed_doc['document_id'],
+                    'pii_count': processed_doc['pii_count'],
+                    'original_filename': processed_doc['original_filename'],
+                    'masked_filename': processed_doc['masked_filename']
+                }
+            
+            current_app.logger.info(f"Document processing completed: {overall_status}")
+            return success_response(processing_summary, message=message)
             
         except Exception as processing_error:
-            # If any step fails, clean up the uploaded document
-            current_app.logger.error(f"Processing failed for document {document_id}: {processing_error}")
+            # If any step fails, clean up uploaded documents
+            current_app.logger.error(f"Processing failed: {processing_error}")
             try:
-                processor.cleanup_processing_data(document_id)
+                for document_id in document_ids:
+                    processor.cleanup_processing_data(document_id)
             except:
                 pass  # Ignore cleanup errors during error handling
             raise processing_error
@@ -1470,6 +1501,19 @@ def process_document_complete():
     except ValueError as e:
         return error_response(str(e), 'PROCESSING_ERROR')
     except Exception as e:
-        current_app.logger.error(f"Complete document processing error: {str(e)}")
+        current_app.logger.error(f"Document processing error: {str(e)}")
         return error_response('Document processing failed', 'INTERNAL_ERROR')
+
+
+# Legacy endpoints for backward compatibility
+@simple_processing_bp.route('/process-document', methods=['POST'])
+def process_document():
+    """Legacy endpoint - redirects to unified process-documents endpoint."""
+    return process_documents()
+
+
+@simple_processing_bp.route('/process-documents-bulk', methods=['POST'])  
+def process_documents_bulk():
+    """Legacy endpoint - redirects to unified process-documents endpoint."""
+    return process_documents()
 
