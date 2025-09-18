@@ -175,9 +175,96 @@ class SimpleDocumentProcessor:
         except Exception as e:
             raise ValueError(f"Bulk upload failed: {str(e)}")
     
+    def process_scanned_pdf_with_ocr(self, document_id: str) -> Dict[str, Any]:
+        """
+        Process a scanned PDF through OCR to create a text file.
+        
+        Args:
+            document_id: Document ID from upload
+            
+        Returns:
+            Dictionary with OCR processing results
+        """
+        try:
+            # Find the uploaded PDF file
+            uploaded_files = list(UPLOADS_DIR.glob(f"{document_id}_*.pdf"))
+            
+            if not uploaded_files:
+                raise ValueError(f"PDF file not found for document_id: {document_id}")
+            
+            original_pdf_path = uploaded_files[0]
+            
+            # Create OCR output path (text file)
+            ocr_filename = f"{document_id}_ocr_extracted.txt"
+            ocr_output_path = UPLOADS_DIR / ocr_filename
+            
+            current_app.logger.info(f"Processing scanned PDF with OCR: {original_pdf_path} -> {ocr_output_path}")
+            
+            # Import and use the OCR processor from scripts directory
+            from scripts.ocr import process_pdf
+            
+            # Process PDF with OCR to generate text file
+            success = process_pdf(str(original_pdf_path), str(ocr_output_path))
+            
+            if not success or not ocr_output_path.exists():
+                raise ValueError("OCR processing failed - no output file generated")
+            
+            current_app.logger.info(f"OCR text extraction completed: {ocr_output_path}")
+            
+            # Backup original scanned PDF
+            backup_filename = f"{document_id}_original_scanned.pdf"
+            backup_path = UPLOADS_DIR / backup_filename
+            original_pdf_path.rename(backup_path)
+            current_app.logger.info(f"Original scanned PDF backed up as: {backup_path}")
+            
+            # Store OCR text file in MongoDB
+            try:
+                with open(ocr_output_path, 'r', encoding='utf-8') as f:
+                    text_data = f.read()
+                
+                # Store as binary data for consistency with other files
+                text_bytes = text_data.encode('utf-8')
+                
+                mongo_doc_id = mongo_db.store_file(
+                    file_data=text_bytes,
+                    file_info={
+                        'original_name': ocr_filename,
+                        'file_size': len(text_bytes),
+                        'status': 'ocr_processed',
+                        'file_type': '.txt',
+                        'mime_type': 'text/plain',
+                        'user_id': 'a6b781b1-401b-435b-aaec-8821a38cf731',
+                        'upload_date': get_current_timestamp(),
+                        'metadata': {
+                            'local_path': str(ocr_output_path),
+                            'document_id': document_id,
+                            'processing_type': 'ocr_extracted_text',
+                            'original_scanned_backup': str(backup_path)
+                        }
+                    }
+                )
+                current_app.logger.info(f"OCR text file stored in MongoDB with ID: {mongo_doc_id}")
+            except Exception as e:
+                current_app.logger.error(f"MongoDB storage of OCR text failed: {e}")
+                mongo_doc_id = None
+            
+            return {
+                'document_id': document_id,
+                'ocr_output_path': str(ocr_output_path),
+                'original_backup_path': str(backup_path),
+                'mongo_id': mongo_doc_id,
+                'status': 'ocr_completed',
+                'output_type': 'text_file',
+                'processing_date': get_current_timestamp()
+            }
+            
+        except Exception as e:
+            raise ValueError(f"OCR processing failed: {str(e)}")
+
     def generate_pii_config(self, document_id: str) -> Dict[str, Any]:
         """
         Generate PII configuration using pii_detector_config_generator.py
+        This method now includes automatic scanned PDF detection and OCR processing.
         
         Args:
             document_id: Document ID from upload
@@ -199,6 +286,33 @@ class SimpleDocumentProcessor:
             
             document_path = uploaded_files[0]
             
+            # Check if PDF is scanned and needs OCR processing
+            ocr_processed = False
+            if document_path.suffix.lower() == '.pdf':
+                current_app.logger.info(f"Checking if PDF is scanned: {document_path}")
+                
+                # Import and use the PDF scan detector  
+                from scripts.pdf_scan_detector import PDFScanDetector
+                detector = PDFScanDetector()
+                
+                # Analyze PDF to determine if it's scanned
+                analysis = detector.analyze_pdf(str(document_path))
+                
+                current_app.logger.info(f"PDF scan analysis: {analysis['analysis_details']}")
+                
+                if analysis['is_scanned']:
+                    current_app.logger.info(f"PDF detected as SCANNED (confidence: {analysis['confidence']:.1%}). Processing with OCR...")
+                    
+                    # Process with OCR to generate text file
+                    ocr_result = self.process_scanned_pdf_with_ocr(document_id)
+                    current_app.logger.info(f"OCR processing completed: {ocr_result['status']}")
+                    
+                    # Update document_path to use OCR generated text file
+                    document_path = Path(ocr_result['ocr_output_path'])
+                    ocr_processed = True
+                else:
+                    current_app.logger.info(f"PDF detected as TEXT-BASED (confidence: {analysis['confidence']:.1%}). Proceeding with normal processing...")
+            
             # Generate config file path
             config_filename = f"{document_id}_pii_config.txt"
             config_path = CONFIGS_DIR / config_filename
@@ -214,7 +328,7 @@ class SimpleDocumentProcessor:
             current_app.logger.info(f"Document exists: {absolute_document_path.exists()}")
             
             result = subprocess.run([
-                'python', 'pii_detector_config_generator.py',
+                'python', 'scripts/pii_detector_config_generator.py',
                 str(absolute_document_path),
                 str(absolute_config_path)
             ], capture_output=True, text=True, cwd=current_app.root_path)
@@ -230,7 +344,8 @@ class SimpleDocumentProcessor:
             
             config_data = self._parse_config_file(config_path)
             
-            return {
+            # Include OCR processing info in response
+            response_data = {
                 'document_id': document_id,
                 'config_path': str(config_path),
                 'config_data': config_data,
@@ -238,8 +353,21 @@ class SimpleDocumentProcessor:
                 'status': 'config_generated'
             }
             
+            # Add OCR processing information if it was performed
+            if ocr_processed:
+                response_data['ocr_processed'] = True
+                response_data['processing_note'] = 'Document was detected as scanned and processed through OCR to extract text before PII detection'
+                response_data['processing_type'] = 'ocr_to_text'
+            else:
+                response_data['ocr_processed'] = False
+                response_data['processing_note'] = 'Document processed directly for PII detection (text-based PDF or non-PDF format)'
+                response_data['processing_type'] = 'direct'
+            
+            return response_data
+            
         except Exception as e:
             raise ValueError(f"Config generation failed: {str(e)}")
+    
     
     def _parse_config_file(self, config_path: Path) -> List[Dict[str, Any]]:
         """Parse the PII config file into structured data."""
@@ -416,7 +544,7 @@ class SimpleDocumentProcessor:
             current_app.logger.info(f"Input exists: {absolute_masking_input.exists()}")
             
             result = subprocess.run([
-                'python', 'bert_pii_masker.py',
+                'python', 'scripts/bert_pii_masker.py',
                 str(absolute_masking_input),
                 str(absolute_output_path),
                 str(absolute_config_path)
@@ -1503,6 +1631,84 @@ def process_documents():
     except Exception as e:
         current_app.logger.error(f"Document processing error: {str(e)}")
         return error_response('Document processing failed', 'INTERNAL_ERROR')
+
+
+@simple_processing_bp.route('/analyze-pdf/<document_id>', methods=['GET'])
+def analyze_pdf_scan_status(document_id: str):
+    """
+    Analyze a PDF to determine if it's scanned or text-based.
+    
+    Args:
+        document_id: Document ID from upload
+        
+    Returns:
+        JSON response with PDF analysis results
+    """
+    try:
+        processor = SimpleDocumentProcessor()
+        
+        # Find the PDF file
+        uploaded_files = list(UPLOADS_DIR.glob(f"{document_id}_*.pdf"))
+        
+        if not uploaded_files:
+            return error_response('PDF_NOT_FOUND', f'PDF file not found for document_id: {document_id}', 404)
+        
+        pdf_path = uploaded_files[0]
+        
+        # Import and use the PDF scan detector
+        from scripts.pdf_scan_detector import PDFScanDetector
+        detector = PDFScanDetector()
+        
+        # Analyze PDF
+        analysis = detector.analyze_pdf(str(pdf_path))
+        
+        response_data = {
+            'document_id': document_id,
+            'pdf_path': str(pdf_path),
+            'analysis': analysis,
+            'recommendation': {
+                'needs_ocr': analysis['is_scanned'],
+                'action': 'Process with OCR before PII detection' if analysis['is_scanned'] else 'Process directly for PII detection'
+            }
+        }
+        
+        return success_response(
+            data=response_data,
+            message=f"PDF analysis completed - {'SCANNED' if analysis['is_scanned'] else 'TEXT-BASED'}"
+        )
+        
+    except Exception as e:
+        current_app.logger.error(f"PDF analysis error: {str(e)}")
+        return error_response('ANALYSIS_ERROR', f'PDF analysis failed: {str(e)}', 500)
+
+
+@simple_processing_bp.route('/process-ocr/<document_id>', methods=['POST'])
+def process_ocr_manually(document_id: str):
+    """
+    Manually trigger OCR processing for a scanned PDF.
+    
+    Args:
+        document_id: Document ID from upload
+        
+    Returns:
+        JSON response with OCR processing results
+    """
+    try:
+        processor = SimpleDocumentProcessor()
+        
+        # Process with OCR
+        result = processor.process_scanned_pdf_with_ocr(document_id)
+        
+        return success_response(
+            data=result,
+            message="OCR processing completed successfully"
+        )
+        
+    except ValueError as e:
+        return error_response('OCR_ERROR', str(e), 400)
+    except Exception as e:
+        current_app.logger.error(f"OCR processing error: {str(e)}")
+        return error_response('PROCESSING_ERROR', f'OCR processing failed: {str(e)}', 500)
 
 
 # Legacy endpoints for backward compatibility

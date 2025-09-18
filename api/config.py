@@ -4,7 +4,6 @@ Simple configuration for hackathon prototype.
 """
 
 import os
-from typing import List
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -30,10 +29,10 @@ class Config:
     JWT_REFRESH_TOKEN_EXPIRES = int(os.getenv('JWT_REFRESH_TOKEN_EXPIRES', '86400'))  # 24 hours
     
     # CORS settings
-    CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'http://localhost:8081').split(',')
+    CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'https://infowise.vercel.app').split(',')
     
     # Frontend URL
-    FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:8081')
+    FRONTEND_URL = os.getenv('FRONTEND_URL', 'https://infowise.vercel.app')
     
     # Google OAuth settings
     GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')

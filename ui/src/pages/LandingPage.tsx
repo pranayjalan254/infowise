@@ -936,39 +936,100 @@ if response.status_code == 200:
                         JSON Response Structure:
                       </div>
                       <div className="text-gray-300">
-                        ├── message: "Processing completed"
-                        <br />
-                        ├── data:
-                        <br />
-                        │ ├── processed_documents: []
-                        <br />│ ├── download_links: {"{}"}
-                        <br />
-                        │ └── overall_status: "completed"
-                        <br />
-                        └── status: "success"
+                        <pre>{`{
+  "data": {
+    "total_files_submitted": 2,
+    "overall_status": "completed",
+    "message": "All 2 document(s) processed successfully",
+    "upload_summary": {
+      "successful_uploads": 2,
+      "failed_uploads": 0,
+      "upload_failures": []
+    },
+    "detection_summary": {
+      "successful_detections": 2,
+      "failed_detections": 0,
+      "detection_failures": []
+    },
+    "masking_summary": {
+      "successful_maskings": 2,
+      "failed_maskings": 0,
+      "masking_failures": []
+    },
+    "processed_documents": [
+      {
+        "document_id": "f6eeff3f-e5c6-43b0-8d31-75489d514759",
+        "original_filename": "document1.pdf",
+        "file_size": 3873,
+        "pii_count": 12,
+        "masked_filename": "document1_masked.pdf",
+        "masked_file_size": 4507,
+        "status": "completed"
+      }
+    ]
+  },
+  "status": "success",
+  "error": null,
+  "meta": {
+    "message": "All 2 document(s) processed successfully",
+    "timestamp": "2025-09-18T05:26:01.893205+00:00",
+    "request_id": "694ee003-88bb-4efd-8713-4bd2860789a4"
+  }
+}`}</pre>
                       </div>
                     </div>
-                    <div className="grid gap-3">
+                    <div className="grid gap-4">
                       <div>
-                        <strong className="text-foreground">
-                          processed_documents
+                        <strong className="text-foreground text-base">
+                          Key Response Fields:
                         </strong>
-                        : Array of successfully processed documents with PII
-                        counts, file sizes, and processing status
                       </div>
-                      <div>
-                        <strong className="text-foreground">
-                          download_links
-                        </strong>
-                        : Direct URLs for downloading masked documents,
-                        previewing originals and results
-                      </div>
-                      <div>
-                        <strong className="text-foreground">
-                          overall_status
-                        </strong>
-                        : "completed", "partial_success", or "failed" based on
-                        processing results
+                      <div className="grid gap-3 pl-4">
+                        <div>
+                          <strong className="text-foreground">
+                            data.overall_status
+                          </strong>
+                          :<span className="text-blue-400"> "completed"</span>,
+                          <span className="text-yellow-400">
+                            {" "}
+                            "partial_success"
+                          </span>
+                          , or
+                          <span className="text-red-400"> "failed"</span>
+                        </div>
+                        <div>
+                          <strong className="text-foreground">
+                            data.processed_documents
+                          </strong>
+                          : Array of successfully processed documents with
+                          detailed information including PII counts, file sizes,
+                          and processing status
+                        </div>
+                        <div>
+                          <strong className="text-foreground">
+                            data.upload_summary
+                          </strong>
+                          : Summary of file upload results including
+                          success/failure counts
+                        </div>
+                        <div>
+                          <strong className="text-foreground">
+                            data.detection_summary
+                          </strong>
+                          : Summary of PII detection results across all
+                          documents
+                        </div>
+                        <div>
+                          <strong className="text-foreground">
+                            data.masking_summary
+                          </strong>
+                          : Summary of PII masking results and any failures
+                        </div>
+                        <div>
+                          <strong className="text-foreground">meta</strong>:
+                          Request metadata including timestamp, request ID, and
+                          processing message
+                        </div>
                       </div>
                     </div>
                   </div>

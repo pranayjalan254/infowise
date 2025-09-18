@@ -857,7 +857,10 @@ export const simpleProcessingApi = {
     `${API_BASE_URL}/simple/preview-masked/${documentId}`,
 
   // New MongoDB-based download endpoints
-  downloadFromMongo: (documentId: string, status: "masked") =>
+  downloadFromMongo: (
+    documentId: string,
+    status: "uploaded" | "masked" = "masked"
+  ) =>
     fetch(
       `${API_BASE_URL}/simple/download-from-mongo/${documentId}?status=${status}`
     ).then((response) => {
