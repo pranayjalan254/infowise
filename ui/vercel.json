@@ -3,7 +3,8 @@
     {
       "source": "/auth/callback",
       "destination": "/api/auth/callback"
-    }
+    },
+    { "source": "/(.*)", "destination": "/" }
   ],
   "redirects": [
     {
