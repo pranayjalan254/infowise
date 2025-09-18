@@ -129,7 +129,6 @@ def get_user_db() -> UserDatabase:
     """Get database instance."""
     global _db
     if _db is None:
-        db_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'users.db')
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        db_path = os.path.join(os.path.dirname(__file__), 'users.db')
         _db = UserDatabase(db_path)
     return _db

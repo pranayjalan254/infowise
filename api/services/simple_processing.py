@@ -106,7 +106,7 @@ class SimpleDocumentProcessor:
                         'status': 'uploaded',
                         'file_type': file_extension,
                         'mime_type': mime_type,
-                        'user_id': 'a6b781b1-401b-435b-aaec-8821a38cf731', 
+                        'user_id': '41d52297-aaed-4985-b403-2ce3aa9cf124', 
                         'upload_date': get_current_timestamp(),
                         'metadata': {
                             'local_path': str(local_path),
@@ -233,7 +233,7 @@ class SimpleDocumentProcessor:
                         'status': 'ocr_processed',
                         'file_type': '.txt',
                         'mime_type': 'text/plain',
-                        'user_id': 'a6b781b1-401b-435b-aaec-8821a38cf731',
+                        'user_id': '41d52297-aaed-4985-b403-2ce3aa9cf124',
                         'upload_date': get_current_timestamp(),
                         'metadata': {
                             'local_path': str(ocr_output_path),
