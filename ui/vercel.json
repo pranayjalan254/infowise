@@ -1,0 +1,15 @@
+{
+  "rewrites": [
+    {
+      "source": "/auth/callback",
+      "destination": "/api/auth/callback"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/api/auth/callback",
+      "destination": "/dashboard",
+      "permanent": false
+    }
+  ]
+}
