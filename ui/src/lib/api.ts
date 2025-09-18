@@ -54,19 +54,6 @@ interface FileUploadResponse {
   upload_url?: string;
 }
 
-interface PIIDetectionResult {
-  detection_id: string;
-  file_id: string;
-  pii_items: Array<{
-    type: string;
-    value: string;
-    confidence: number;
-    location: string;
-    severity: "low" | "medium" | "high";
-  }>;
-  status: "pending" | "completed" | "failed";
-}
-
 // Auth utilities
 export const getAuthToken = (): string | null => {
   return localStorage.getItem("auth_token");

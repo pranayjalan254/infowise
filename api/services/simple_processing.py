@@ -68,10 +68,10 @@ class SimpleDocumentProcessor:
                 raise ValueError("Invalid filename")
             
             # Check for supported file types
-            supported_extensions = ['.pdf', '.docx', '.txt', '.csv']
+            supported_extensions = ['.pdf', '.docx', '.txt']
             file_extension = os.path.splitext(filename)[1].lower()
             if file_extension not in supported_extensions:
-                raise ValueError("Only PDF, Word (.docx), text (.txt), and CSV (.csv) files are supported")
+                raise ValueError("Only PDF, Word (.docx), and text (.txt) files are supported")
             
             # Generate unique document ID
             doc_id = self.generate_document_id()
@@ -84,8 +84,7 @@ class SimpleDocumentProcessor:
             mime_type_map = {
                 '.pdf': 'application/pdf',
                 '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                '.txt': 'text/plain',
-                '.csv': 'text/csv'
+                '.txt': 'text/plain'
             }
             mime_type = mime_type_map.get(file_extension.lower(), 'application/octet-stream')
             
@@ -610,159 +609,7 @@ class SimpleDocumentProcessor:
         except Exception as e:
             raise ValueError(f"Masking failed: {str(e)}")
     
-    def process_csv_documents(self, document_ids: List[str]) -> Dict[str, Any]:
-        """
-        Process CSV documents using the CSV handler for PII anonymization.
-        
-        Args:
-            document_ids: List of document IDs for CSV files
-            
-        Returns:
-            Dictionary with processing results
-        """
-        try:
-            from scripts.csv_handler import anonymize_csv_files, build_global_plan, anonymize_with_plan
-            import shutil
-            
-            # Create temporary input and output directories for this batch
-            temp_input_dir = UPLOADS_DIR / f"temp_csv_input_{uuid.uuid4()}"
-            temp_output_dir = RESULTS_DIR / f"temp_csv_output_{uuid.uuid4()}"
-            
-            temp_input_dir.mkdir(parents=True, exist_ok=True)
-            temp_output_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Copy CSV files to temporary input directory
-            csv_files = []
-            document_info = {}
-            
-            for doc_id in document_ids:
-                # Find the CSV file for this document
-                uploaded_files = list(UPLOADS_DIR.glob(f"{doc_id}_*.csv"))
-                if not uploaded_files:
-                    current_app.logger.warning(f"CSV file not found for document_id: {doc_id}")
-                    continue
-                
-                original_file = uploaded_files[0]
-                original_name = original_file.name.replace(f"{doc_id}_", "")
-                
-                # Copy to temp input directory with original name
-                temp_file_path = temp_input_dir / original_name
-                shutil.copy2(original_file, temp_file_path)
-                csv_files.append(str(temp_file_path))
-                
-                document_info[doc_id] = {
-                    'original_file': str(original_file),
-                    'original_name': original_name,
-                    'temp_input_path': str(temp_file_path)
-                }
-            
-            if not csv_files:
-                raise ValueError("No CSV files found for the provided document IDs")
-            
-            # Process CSV files using the global plan approach
-            col_info, link_groups = build_global_plan(csv_files)
-            
-            # Set the output directory in csv_handler
-            import api.scripts.csv_handler as csv_handler
-            original_output_dir = csv_handler.OUTPUT_DIR
-            csv_handler.OUTPUT_DIR = str(temp_output_dir)
-            
-            try:
-                # Anonymize the CSV files
-                anonymize_with_plan(csv_files, col_info, link_groups)
-            finally:
-                # Restore original output directory
-                csv_handler.OUTPUT_DIR = original_output_dir
-            
-            # Move processed files to results directory and create final results
-            processed_files = []
-            for doc_id, info in document_info.items():
-                original_name = info['original_name']
-                temp_output_file = temp_output_dir / original_name
-                
-                if temp_output_file.exists():
-                    # Create final output filename
-                    final_output_name = f"{doc_id}_masked.csv"
-                    final_output_path = RESULTS_DIR / final_output_name
-                    
-                    # Move processed file to final location
-                    shutil.move(str(temp_output_file), str(final_output_path))
-                    
-                    # Create processing report
-                    report_content = self._create_csv_processing_report(doc_id, info['original_name'], col_info, link_groups)
-                    report_path = RESULTS_DIR / f"{doc_id}_masked_processing_report.txt"
-                    with open(report_path, 'w') as f:
-                        f.write(report_content)
-                    
-                    processed_files.append({
-                        'document_id': doc_id,
-                        'original_name': info['original_name'],
-                        'processed_file': str(final_output_path),
-                        'report_file': str(report_path),
-                        'status': 'success'
-                    })
-                else:
-                    processed_files.append({
-                        'document_id': doc_id,
-                        'original_name': info['original_name'],
-                        'status': 'failed',
-                        'error': 'Output file not generated'
-                    })
-            
-            # Cleanup temporary directories
-            shutil.rmtree(temp_input_dir, ignore_errors=True)
-            shutil.rmtree(temp_output_dir, ignore_errors=True)
-            
-            return {
-                'processed_files': processed_files,
-                'total_files': len(document_ids),
-                'successful_count': len([f for f in processed_files if f['status'] == 'success']),
-                'failed_count': len([f for f in processed_files if f['status'] == 'failed']),
-                'processing_date': get_current_timestamp(),
-                'classification_info': col_info,
-                'link_groups': link_groups
-            }
-            
-        except Exception as e:
-            current_app.logger.error(f"CSV processing failed: {str(e)}")
-            raise ValueError(f"CSV processing failed: {str(e)}")
-    
-    def _create_csv_processing_report(self, document_id: str, original_name: str, col_info: Dict, link_groups: List) -> str:
-        """Create a processing report for CSV anonymization."""
-        report_lines = [
-            f"CSV Processing Report",
-            f"==================",
-            f"Document ID: {document_id}",
-            f"Original File: {original_name}",
-            f"Processing Date: {get_current_timestamp()}",
-            f"",
-            f"Column Classifications:",
-            f"----------------------"
-        ]
-        
-        for col_name, info in col_info.items():
-            label = info.get('label', 'NONE')
-            subtype = info.get('subtype', 'other')
-            confidence = info.get('confidence', 0.0)
-            report_lines.append(f"Column: {col_name} | Label: {label} | Subtype: {subtype} | Confidence: {confidence:.2f}")
-        
-        if link_groups:
-            report_lines.extend([
-                f"",
-                f"Linked Column Groups:",
-                f"--------------------"
-            ])
-            for idx, group in enumerate(link_groups):
-                group_columns = [f"{path.split('/')[-1]}:{col}" for path, col in group]
-                report_lines.append(f"Group {idx + 1}: {', '.join(group_columns)}")
-        
-        report_lines.extend([
-            f"",
-            f"Processing completed successfully.",
-            f"Synthetic data maintains referential integrity across linked columns."
-        ])
-        
-        return "\n".join(report_lines)
+    def get_document_info_from_mongo(self, document_id: str, status: str = None) -> Dict[str, Any]:
         """
         Retrieve document information from MongoDB.
         
