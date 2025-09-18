@@ -112,18 +112,115 @@ def call_Ollama_combined(all_samples: Dict[str, pd.DataFrame]) -> List[Dict[str,
     prompt = build_combined_prompt(all_samples)
     messages = [SystemMessage(content="You are a helpful classifier."), HumanMessage(content=prompt)]
     resp = llm.invoke(messages).content
+    
     try:
-        start = min([i for i in (resp.find('['), resp.find('{')) if i != -1])
-        end = max(resp.rfind(']'), resp.rfind('}'))
-        json_text = resp[start:end+1]
+        # Handle markdown code blocks
+        if "```json" in resp:
+            json_start = resp.find("```json") + 7
+            json_end = resp.find("```", json_start)
+            json_text = resp[json_start:json_end].strip()
+        elif "```" in resp:
+            json_start = resp.find("```") + 3
+            json_end = resp.find("```", json_start)
+            json_text = resp[json_start:json_end].strip()
+        else:
+            # Try to find JSON boundaries
+            start = min([i for i in (resp.find('['), resp.find('{')) if i != -1])
+            end = max(resp.rfind(']'), resp.rfind('}'))
+            json_text = resp[start:end+1]
+        
         parsed = json.loads(json_text)
-        return parsed
-    except Exception:
-        # fallback: return nothing classified
-        all_cols = set()
-        for df in all_samples.values():
-            all_cols.update(df.columns.tolist())
-        return [{"column": c, "label": "NONE", "subtype": "other", "confidence": 0.0, "examples": []} for c in sorted(all_cols)]
+        
+        # Clean up and normalize the parsed results
+        cleaned_results = []
+        for item in parsed:
+            # Fix malformed labels like "PII|PHIGAH (HIPAA)" -> "PII"
+            label = item.get('label', 'NONE')
+            if '|' in label:
+                label = label.split('|')[0].strip()
+            label = label.upper()
+            if label not in ['PII', 'PHI', 'NONE']:
+                label = 'NONE'
+            
+            # Fix null subtypes
+            subtype = item.get('subtype')
+            if subtype is None or subtype == 'null':
+                subtype = 'other'
+            
+            cleaned_results.append({
+                'column': item.get('column', ''),
+                'label': label,
+                'subtype': subtype,
+                'confidence': item.get('confidence', 0.0),
+                'examples': item.get('examples', [])
+            })
+        
+        return cleaned_results
+        
+    except Exception as e:
+        print(f"JSON parsing failed: {e}")
+        
+        # Try a more robust manual parsing approach for the specific Ollama output format
+        try:
+            return parse_ollama_response_manually(resp, all_samples)
+        except Exception as e2:
+            print(f"Manual parsing also failed: {e2}")
+            # fallback: return nothing classified
+            all_cols = set()
+            for df in all_samples.values():
+                all_cols.update(df.columns.tolist())
+            return [{"column": c, "label": "NONE", "subtype": "other", "confidence": 0.0, "examples": []} for c in sorted(all_cols)]
+
+
+def parse_ollama_response_manually(resp: str, all_samples: Dict[str, pd.DataFrame]) -> List[Dict[str, Any]]:
+    """Manual parser for Ollama responses that don't parse as valid JSON."""
+    import re
+    
+    results = []
+    all_cols = set()
+    for df in all_samples.values():
+        all_cols.update(df.columns.tolist())
+    
+    # Look for patterns like "FullName", "label": "PII"
+    for col in all_cols:
+        # Search for this column in the response
+        pattern = rf'["\']?{re.escape(col)}["\']?\s*[:\s]*.*?["\']([A-Z]+)["\']'
+        match = re.search(pattern, resp, re.IGNORECASE | re.DOTALL)
+        
+        if match:
+            label = match.group(1).upper()
+            if label in ['PII', 'PHI', 'NONE']:
+                # Try to extract subtype
+                subtype_pattern = rf'["\']?{re.escape(col)}["\']?.*?subtype["\']?\s*[:\s]*["\']([^"\']+)["\']'
+                subtype_match = re.search(subtype_pattern, resp, re.IGNORECASE | re.DOTALL)
+                subtype = subtype_match.group(1) if subtype_match else "other"
+                
+                results.append({
+                    "column": col,
+                    "label": label,
+                    "subtype": subtype,
+                    "confidence": 0.8,
+                    "examples": []
+                })
+            else:
+                results.append({
+                    "column": col,
+                    "label": "NONE",
+                    "subtype": "other", 
+                    "confidence": 0.0,
+                    "examples": []
+                })
+        else:
+            # Default to NONE if not found
+            results.append({
+                "column": col,
+                "label": "NONE",
+                "subtype": "other",
+                "confidence": 0.0,
+                "examples": []
+            })
+    
+    return results
 
 # ----------------------
 # Linking detection

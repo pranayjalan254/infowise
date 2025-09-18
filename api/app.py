@@ -9,6 +9,7 @@ from extensions import init_all_extensions
 from utils.errors import register_error_handlers
 from typing import Optional
 import os
+from flask_cors import CORS
 
 
 def create_app(config_name: Optional[str] = None) -> Flask:
@@ -33,6 +34,7 @@ def create_app(config_name: Optional[str] = None) -> Flask:
     # Load configuration
     app.config.from_object(config[config_name])
     config[config_name].init_app(app)
+    CORS(app, resources={r"/*": {"origins": "*"}})
     
     # Initialize extensions
     init_all_extensions(app)
