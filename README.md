@@ -234,7 +234,7 @@ npm install
    Create `.env` file:
 
 ```env
-VITE_API_URL=http://localhost:5000/api/v1
+VITE_API_URL=https://infowise-3mayd.ondigitalocean.app/api/v1
 ```
 
 4. **Run development server**

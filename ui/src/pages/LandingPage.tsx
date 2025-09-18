@@ -735,12 +735,12 @@ export default function LandingPage() {
                           size="sm"
                           onClick={() => {
                             navigator.clipboard.writeText(`# Single document
-curl -X POST http://localhost:5000/api/v1/simple/process-documents \\
+curl -X POST https://infowise-3mayd.ondigitalocean.app/api/v1/simple/process-documents \\
   -F "document=@your_document.pdf" \\
   -o masked_document.pdf
 
 # Multiple documents
-curl -X POST http://localhost:5000/api/v1/simple/process-documents \\
+curl -X POST https://infowise-3mayd.ondigitalocean.app/api/v1/simple/process-documents \\
   -F "documents=@document1.pdf" \\
   -F "documents=@document2.docx" \\
   -F "documents=@document3.txt"`);
@@ -752,12 +752,12 @@ curl -X POST http://localhost:5000/api/v1/simple/process-documents \\
                       <div className="bg-gray-900 dark:bg-gray-800 p-4 rounded-lg overflow-x-auto">
                         <pre className="text-sm text-gray-300">
                           {`# Single document
-curl -X POST http://localhost:5000/api/v1/simple/process-documents \\
+curl -X POST https://infowise-3mayd.ondigitalocean.app/api/v1/simple/process-documents \\
   -F "document=@your_document.pdf" \\
   -o masked_document.pdf
 
 # Multiple documents
-curl -X POST http://localhost:5000/api/v1/simple/process-documents \\
+curl -X POST https://infowise-3mayd.ondigitalocean.app/api/v1/simple/process-documents \\
   -F "documents=@document1.pdf" \\
   -F "documents=@document2.docx" \\
   -F "documents=@document3.txt"`}
@@ -853,7 +853,7 @@ fetch('/api/v1/simple/process-documents', {
                             navigator.clipboard.writeText(`import requests
 
 # Single document processing
-url = "http://localhost:5000/api/v1/simple/process-documents"
+url = "https://infowise-3mayd.ondigitalocean.app/api/v1/simple/process-documents"
 files = {"document": open("your_document.pdf", "rb")}
 
 response = requests.post(url, files=files)
@@ -890,7 +890,7 @@ if response.status_code == 200:
                           {`import requests
 
 # Single document processing
-url = "http://localhost:5000/api/v1/simple/process-documents"
+url = "https://infowise-3mayd.ondigitalocean.app/api/v1/simple/process-documents"
 files = {"document": open("your_document.pdf", "rb")}
 
 response = requests.post(url, files=files)

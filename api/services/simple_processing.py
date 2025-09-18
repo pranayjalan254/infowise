@@ -1465,11 +1465,11 @@ def process_documents():
     
     Usage Examples:
         # Single document
-        curl -X POST http://localhost:5000/api/v1/simple/process-documents \
+        curl -X POST https://infowise-3mayd.ondigitalocean.app/api/v1/simple/process-documents \
              -F "document=@your_document.pdf"
              
         # Multiple documents
-        curl -X POST http://localhost:5000/api/v1/simple/process-documents \
+        curl -X POST https://infowise-3mayd.ondigitalocean.app//api/v1/simple/process-documents \
              -F "documents=@document1.pdf" \
              -F "documents=@document2.docx" \
              -F "documents=@document3.txt"

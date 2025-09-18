@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import { Eye, EyeOff, LogIn, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,7 @@ interface AuthPageProps {
 export default function AuthPage({ onLogin }: AuthPageProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const navigate = useNavigate();
   const [loginForm, setLoginForm] = useState({
     email: "",
     password: "",
@@ -50,6 +52,8 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
           title: "Login successful",
           description: `Welcome back, ${response.data.user.first_name}!`,
         });
+        // Navigate to dashboard after successful login
+        navigate("/dashboard");
       }
     } catch (error) {
       toast({
@@ -89,6 +93,8 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
           title: "Registration successful",
           description: `Welcome to Infowise, ${response.data.user.first_name}!`,
         });
+        // Navigate to dashboard after successful registration
+        navigate("/dashboard");
       }
     } catch (error) {
       toast({
