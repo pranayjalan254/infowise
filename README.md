@@ -1,6 +1,6 @@
 # InfoWise - Comprehensive PII Detection and Masking System
 
-A sophisticated document processing platform that detects, analyzes, and masks Personally Identifiable Information (PII) in documents using multiple AI/ML approaches. Also has a Synthetic Dataset Generator module which lets you generate Synthetic data to train your AI models. Built with Python Flask backend and React and Typescript frontend.
+A sophisticated document processing platform that detects, analyzes, and masks Personally Identifiable Information (PII) in documents using multiple AI/ML approaches. Also has a Synthetic Data Generator module which lets you generate Synthetic data to test your AI models. Built with Python Flask backend and React and Typescript frontend.
 
 ## 🚀 System Architecture
 
@@ -8,7 +8,7 @@ A sophisticated document processing platform that detects, analyzes, and masks P
 
 - **Framework**: Flask with modular blueprint architecture
 - **Database**: MongoDB for document storage and metadata
-- **AI/ML Stack**: BERT NER, Locally hosted LLM
+- **AI/ML Stack**: BERT NER, Locally hosted LLM (Ollama)
 - **Document Processing**: PyMuPDF for PDF handling, python-docx for Word documents
 - **Authentication**: JWT with Google OAuth2 support
 
@@ -32,9 +32,10 @@ A sophisticated document processing platform that detects, analyzes, and masks P
 
 ### 📄 Document Format Support
 
-- **PDF Documents**: Full coordinate-based detection and masking
+- **PDF Documents**: Takes both Text and Scanned based.
 - **Word Documents (.docx)**: Automatic conversion to PDF for processing
 - **Text Files (.txt)**: Conversion to PDF with proper formatting
+- **CSV Files (.csv)**: Specialised AI Agent that masks multiple csvs together and preserves context.
 
 ### 🎯 PII Types Detected
 
@@ -62,114 +63,53 @@ A sophisticated document processing platform that detects, analyzes, and masks P
 
 1. **Document Upload**: Secure file upload with validation
 2. **PII Detection**: Multi-method analysis with confidence scoring
-3. **Configuration**: Interactive review and strategy selection
+3. **Review**: Human in the loop to review the detected PII.
 4. **Masking**: Apply chosen strategies with coordinate precision
-5. **Download**: Retrieve processed, privacy-compliant documents
+5. **Comparison & Download**: Retrieve processed, privacy-compliant documents
 
-## 🛠️ Technical Implementation
+## 🌐 External API
 
-### Backend Services
+InfoWise provides a powerful REST API for programmatic document processing, enabling seamless integration into existing workflows and applications.
 
-#### Authentication Service (`services/auth.py`)
+### API Endpoint
 
-- User registration and login
-- Google OAuth2 integration
-- JWT token management
-- Session handling
+```bash
+POST https://infowise-3mayd.ondigitalocean.app/api/v1/simple/process-documents
+```
 
-#### Document Management (`services/documents.py`)
+### Key Features
 
-- File upload/download using MongoDB GridFS
-- Document metadata management
-- Secure file serving
+- **Bulk Document Processing**: Handle single or multiple documents in one request with parallel processing
+- **25+ PII Types Detected**: Comprehensive coverage including financial, medical, technical, and personal data
+- **Hybrid AI/ML Approach**: Combines LLM, BERT NER, and regex patterns for maximum accuracy
+- **Context-Aware Masking**: Intelligent masking strategies that preserve document utility
+- **Multi-Format Support**: PDF, DOCX, TXT, CSV, and image files
+- **Automatic Cleanup**: Memory optimization and temporary file management
 
-#### PII Detection (`services/pii_detection.py`)
+### Comprehensive PII Detection Coverage
 
-- Enhanced multi-method PII detection
-- Confidence scoring and verification
-- Real-time streaming results
-
-#### Simple Processing (`services/simple_processing.py`)
-
-- Streamlined workflow for hackathon demo
-- End-to-end document processing pipeline
-- Configuration management
-
-#### Core Components
-
-- **Enhanced PII Detector** (`enhanced_pii_detector.py`): Multi-approach detection engine
-- **Document Converter** (`document_converter.py`): Format conversion utilities
-- **PII Masker** (`bert_pii_masker.py`): Coordinate-based masking system
-
-### Frontend Components
-
-#### Page Components
-
-- **Landing Page**: Marketing and feature presentation
-- **Authentication Pages**: Login/register with Google OAuth
-- **Dashboard**: User analytics and system overview
-- **Document Ingestion**: Multi-step processing workflow
-- **Settings**: User preferences and configuration
-
-#### UI Components
-
-- **Document Upload**: Drag-and-drop file upload with progress
-- **PII Detection Display**: Interactive detection results
-- **Configuration Interface**: Strategy selection and editing
-- **Document Viewer**: In-browser PDF preview
-- **Progress Tracking**: Real-time workflow status
-
-## 📋 API Endpoints
-
-### Authentication
-
-- `POST /api/v1/auth/register` - User registration
-- `POST /api/v1/auth/login` - User login
-- `POST /api/v1/auth/logout` - User logout
-- `GET /api/v1/auth/google` - Initiate Google OAuth
-- `POST /api/v1/auth/google/callback` - Handle OAuth callback
-- `GET /api/v1/auth/me` - Get current user info
-
-### Document Management
-
-- `POST /api/v1/documents/upload` - Upload documents
-- `GET /api/v1/documents/list` - List user documents
-- `GET /api/v1/documents/<doc_id>` - Get document details
-- `DELETE /api/v1/documents/<doc_id>` - Delete document
-- `GET /api/v1/documents/<doc_id>/view` - View document
-- `GET /api/v1/documents/<doc_id>/download` - Download document
-
-### PII Processing
-
-- `POST /api/v1/pii/detect/<document_id>` - Detect PII in document
-- `GET /api/v1/pii/results/<document_id>` - Get detection results
-- `POST /api/v1/pii/save-config/<document_id>` - Save PII configuration
-- `GET /api/v1/pii/detect-stream/<document_id>` - Streaming detection
-
-### Simple Processing (Hackathon Demo)
-
-- `POST /api/v1/simple/upload` - Upload document
-- `POST /api/v1/simple/generate-config/<document_id>` - Generate PII config
-- `GET /api/v1/simple/config/<document_id>` - Get configuration
-- `PUT /api/v1/simple/config/<document_id>` - Update configuration
-- `POST /api/v1/simple/apply-masking/<document_id>` - Apply masking
-- `GET /api/v1/simple/download/<document_id>` - Download masked document
+**Personal Identifiers**: Names, SSN, Passport, Driver License, Organizations  
+**Contact Information**: Email, Phone, Address, ZIP Codes  
+**Financial Data**: Credit Cards, Bank Accounts, PAN, Aadhaar  
+**Medical & IDs**: Employee ID, Student ID, Medical Records, Insurance ID, Date of Birth  
+**Technical Data**: IP Address, MAC Address, URLs, GPS Coordinates, Vehicle Plates  
+**Tracking Codes**: Tracking Numbers, Barcodes, Vaccine Lots, Receipt Numbers
 
 ## 🚀 Installation & Setup
 
 ### Prerequisites
 
-- Python 3.8+
-- Node.js 16+
+- Python 3.12+
+- Node.js 18+
 - MongoDB instance
-- Google Cloud Project (for Gemini API)
+- Ollama, Tesseract OCR and other BERT Based models
 
 ### Backend Setup
 
 1. **Clone the repository**
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/pranayjalan254/infowise.git
 cd infowise/api
 ```
 
@@ -204,7 +144,7 @@ SECRET_KEY=your-secret-key
 JWT_SECRET_KEY=your-jwt-secret
 GOOGLE_CLIENT_ID=your-google-client-id
 GOOGLE_CLIENT_SECRET=your-google-client-secret
-GOOGLE_API_KEY=your-gemini-api-key
+GOOGLE_REDIRECT_URI=your-google-redirect-uri
 MONGODB_CONNECTION_STRING=mongodb://localhost:27017/infowise
 CORS_ORIGINS=http://localhost:8080
 FRONTEND_URL=http://localhost:8080
@@ -234,7 +174,7 @@ npm install
    Create `.env` file:
 
 ```env
-VITE_API_URL=https://infowise-3mayd.ondigitalocean.app/api/v1
+VITE_API_URL=http://localhost:5000/api/v1
 ```
 
 4. **Run development server**
@@ -243,89 +183,19 @@ VITE_API_URL=https://infowise-3mayd.ondigitalocean.app/api/v1
 npm run dev
 ```
 
-## 🔧 Configuration
-
-### PII Detection Configuration
-
-The system supports configurable PII detection patterns in `enhanced_pii_detector.py`:
-
-- Custom regex patterns for specific PII types
-- Confidence thresholds for each detection method
-- False positive patterns to exclude common false matches
-- Severity levels for different PII categories
-
 ### Masking Strategies
 
 Configure masking approaches in the PII configuration files:
 
 - **Redact**: Complete removal of PII
 - **Mask**: Partial character masking with patterns
-- **Replace**: Substitution with generic placeholders
+- **Replace**: Substitution with dummy data
 - **Custom**: User-defined masking strategies
-
-### MongoDB Configuration
-
-Documents and metadata are stored using MongoDB GridFS:
-
-- File storage with automatic chunking
-- Metadata indexing for fast retrieval
-- User-based access control
-- Automatic cleanup of expired sessions
-
-## 🧪 Testing
-
-### Backend Testing
-
-```bash
-cd api
-python -m pytest tests/
-```
-
-### Frontend Testing
-
-```bash
-cd ui
-npm run test
-```
-
-## 📊 Performance & Scalability
-
-### Detection Performance
-
-- **BERT Model**: ~2-3 seconds per page
-- **Presidio**: ~1-2 seconds per page
-- **Regex**: <1 second per page
-- **LLM Verification**: ~3-5 seconds per batch
-
-### Scalability Features
-
-- **Asynchronous Processing**: Background task queues
-- **Streaming Results**: Real-time progress updates
-- **Batch Processing**: Multiple document handling
-- **Caching**: Result caching for repeated operations
-
-## 🔒 Security & Privacy
-
-### Data Protection
-
-- **Encryption at Rest**: MongoDB encrypted storage
-- **Secure File Handling**: Temporary file cleanup
-- **Access Control**: User-based document isolation
-- **JWT Security**: Token-based authentication
-
-### Compliance Features
-
-- **Audit Logging**: Complete processing history
-- **Data Retention**: Configurable cleanup policies
-- **Privacy by Design**: Minimal data collection
-- **Secure Deletion**: Permanent file removal
 
 ## 🎯 Future Enhancements
 
 ### Planned Features
 
-- **Additional File Formats**: Excel, PowerPoint, CSV support
-- **Batch Processing**: Multiple document workflows
 - **API Rate Limiting**: Request throttling and quotas
 - **Advanced Analytics**: PII trend analysis and reporting
 - **Custom Model Training**: User-specific PII detection
@@ -338,11 +208,3 @@ npm run test
 - **Load Balancing**: Multi-instance scaling
 - **Database Migrations**: Schema versioning
 - **Monitoring & Alerting**: System health tracking
-
-## 🤝 Contributing
-
-This project was developed for hackathon demonstration. The modular architecture supports easy extension and customization of detection methods, masking strategies, and UI components.
-
----
-
-This comprehensive PII detection and masking system demonstrates enterprise-grade document processing capabilities with a user-friendly interface, making sensitive data protection accessible and efficient for organizations of all sizes.

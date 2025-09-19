@@ -1,21 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { SimpleDocumentUpload } from "@/components/ingestion/SimpleDocumentUpload";
-import { SimpleDetectionStep } from "@/components/ingestion/SimpleDetectionStep";
 import { SimpleMaskingStep } from "@/components/ingestion/SimpleMaskingStep";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  CheckCircle,
-  Circle,
-  Clock,
-  FileText,
-  Wand2,
-  Eye,
-  Download,
-} from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { CheckCircle, Circle, Clock, FileText, Wand2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { simpleProcessingApi } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
@@ -38,6 +30,12 @@ interface FileProcessingState {
   detectedPIIData: any;
   maskingResults: any;
   error?: string;
+  // Enhanced progress tracking
+  estimatedPages?: number;
+  currentPage?: number;
+  detectionProgress?: number;
+  processingMessages?: string[];
+  totalPiiFound?: number;
 }
 
 interface WorkflowStep {
@@ -85,6 +83,14 @@ export default function SimpleDocumentIngestion() {
     FileProcessingState[]
   >([]);
   const [activeFileTab, setActiveFileTab] = useState<string>("");
+  const [isDetectionRunning, setIsDetectionRunning] = useState(false);
+  const [detectionStartTime, setDetectionStartTime] = useState<Date | null>(
+    null
+  );
+  const [overallDetectionProgress, setOverallDetectionProgress] = useState(0);
+  const [detectionMessage, setDetectionMessage] = useState<string>("");
+  const [isMaskingRunning, setIsMaskingRunning] = useState(false);
+  const [maskingMessage, setMaskingMessage] = useState<string>("");
   const { toast } = useToast();
 
   const handleUploadComplete = async (files: UploadedFile[]) => {
@@ -120,113 +126,176 @@ export default function SimpleDocumentIngestion() {
 
   const handleStartDetection = async () => {
     try {
-      const documentIds = uploadedFiles.map((file) => file.id);
-      console.log("Starting bulk PII detection for documents:", documentIds);
+      setIsDetectionRunning(true);
+      setDetectionStartTime(new Date());
+      setOverallDetectionProgress(0);
+      setDetectionMessage("Initializing PII detection...");
 
-      // Update states to processing
+      // Update steps to show detection is active
+      setSteps((prev) =>
+        prev.map((step) =>
+          step.id === "detection"
+            ? { ...step, status: "active" }
+            : step.id === "upload"
+            ? { ...step, status: "completed" }
+            : step
+        )
+      );
+
+      setCurrentPhase("detection");
+
+      // Update all file processing states to show detection is starting
       setFileProcessingStates((prev) =>
         prev.map((state) => ({
           ...state,
-          detectionStatus: "processing" as const,
-          currentStep: "detection" as const,
+          detectionStatus: "processing",
+          currentStep: "detection",
         }))
       );
 
-      // Move to detection phase
-      setCurrentPhase("detection");
-      setSteps((prev) =>
-        prev.map((step) => {
-          if (step.id === "upload") return { ...step, status: "completed" };
-          if (step.id === "detection") return { ...step, status: "active" };
-          return step;
-        })
-      );
-
-      const response = await simpleProcessingApi.generateConfigBulk(
-        documentIds
-      );
-
-      if (response.status === "success" && response.data) {
-        const { successful_configs, failed_configs } = response.data;
-
-        // Update processing states with detection results
-        setFileProcessingStates((prev) =>
-          prev.map((state) => {
-            const successConfig = successful_configs.find(
-              (config: any) => config.document_id === state.fileId
-            );
-            const failedConfig = failed_configs.find(
-              (config: any) => config.document_id === state.fileId
-            );
-
-            if (successConfig) {
-              return {
-                ...state,
-                detectionStatus: "completed" as const,
-                detectedPIIData: {
-                  document_id: successConfig.document_id,
-                  total_pii: successConfig.total_pii,
-                  config_data: successConfig.config_data.map(
-                    (item: any, index: number) => ({
-                      id: item.id || `pii_${index}`,
-                      type: item.type,
-                      text: item.text,
-                      confidence: 0.9,
-                      location: `Page ${item.page + 1}`,
-                      severity: getSeverityFromType(item.type),
-                      suggested_strategy: item.strategy,
-                      coordinates: item.coordinates,
-                    })
-                  ),
-                },
-                currentStep: "masking" as const,
-              };
-            } else if (failedConfig) {
-              return {
-                ...state,
-                detectionStatus: "error" as const,
-                error: failedConfig.error,
-              };
+      // Simple progress simulation - slow progress that doesn't reach 100%
+      const progressInterval = setInterval(() => {
+        setOverallDetectionProgress((prev) => {
+          if (prev < 85) {
+            // Slow progress in the beginning
+            if (prev < 20) {
+              setDetectionMessage("Analyzing document structure...");
+              return prev + Math.random() * 2 + 0.5;
             }
-            return state;
-          })
+            // Medium progress in the middle
+            else if (prev < 50) {
+              setDetectionMessage("Extracting text content...");
+              return prev + Math.random() * 1.5 + 0.3;
+            }
+            // Very slow progress towards the end
+            else {
+              setDetectionMessage("Running PII detection models...");
+              return prev + Math.random() * 0.5 + 0.1;
+            }
+          }
+          return prev; // Stay at ~85% until API completes
+        });
+      }, 800);
+
+      // Wait a bit for UI to show progress, then make the API call
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      try {
+        const documentIds = uploadedFiles.map((file) => file.id);
+        const response = await simpleProcessingApi.generateConfigBulk(
+          documentIds
         );
 
-        // Move to masking phase
-        setCurrentPhase("masking");
-        setSteps((prev) =>
-          prev.map((step) => {
-            if (step.id === "detection")
-              return { ...step, status: "completed" };
-            if (step.id === "masking") return { ...step, status: "active" };
-            return step;
-          })
+        clearInterval(progressInterval);
+
+        // Complete the progress
+        setOverallDetectionProgress(100);
+        setDetectionMessage("Detection completed successfully!");
+
+        if (response.status === "success" && response.data) {
+          const { successful_configs, failed_configs } = response.data;
+
+          // Update processing states with detection results
+          setFileProcessingStates((prev) =>
+            prev.map((state) => {
+              const successConfig = successful_configs.find(
+                (config: any) => config.document_id === state.fileId
+              );
+              const failedConfig = failed_configs.find(
+                (config: any) => config.document_id === state.fileId
+              );
+
+              if (successConfig) {
+                return {
+                  ...state,
+                  detectionStatus: "completed" as const,
+                  detectedPIIData: {
+                    document_id: successConfig.document_id,
+                    total_pii: successConfig.total_pii,
+                    config_data: successConfig.config_data.map(
+                      (item: any, index: number) => ({
+                        id: item.id || `pii_${index}`,
+                        type: item.type,
+                        text: item.text,
+                        confidence: 0.9,
+                        location: `Page ${item.page + 1}`,
+                        severity: getSeverityFromType(item.type),
+                        suggested_strategy: item.strategy,
+                        coordinates: item.coordinates,
+                      })
+                    ),
+                  },
+                  currentStep: "masking" as const,
+                };
+              } else if (failedConfig) {
+                return {
+                  ...state,
+                  detectionStatus: "error" as const,
+                  error: failedConfig.error,
+                };
+              }
+              return state;
+            })
+          );
+
+          // Move to masking phase
+          setCurrentPhase("masking");
+          setSteps((prev) =>
+            prev.map((step) => {
+              if (step.id === "detection")
+                return { ...step, status: "completed" };
+              if (step.id === "masking") return { ...step, status: "active" };
+              return step;
+            })
+          );
+
+          toast({
+            title: "PII Detection Complete",
+            description: `Detected PII in ${successful_configs.length} of ${uploadedFiles.length} files.`,
+          });
+        }
+      } catch (apiError) {
+        clearInterval(progressInterval);
+        console.error("API Error during detection:", apiError);
+
+        setOverallDetectionProgress(100);
+        setDetectionMessage("Detection failed");
+
+        setFileProcessingStates((prev) =>
+          prev.map((state) => ({
+            ...state,
+            detectionStatus: "error",
+            error: "Failed to detect PII. Please try again.",
+          }))
         );
 
         toast({
-          title: "PII Detection Complete",
-          description: `Detected PII in ${successful_configs.length} of ${uploadedFiles.length} files.`,
+          title: "Detection Failed",
+          description:
+            "Failed to detect PII in the documents. Please try again.",
+          variant: "destructive",
         });
       }
     } catch (error) {
-      console.error("Bulk detection error:", error);
-      // Update all files to error state
+      console.error("Detection error:", error);
+      setOverallDetectionProgress(100);
+      setDetectionMessage("Detection failed");
+
       setFileProcessingStates((prev) =>
         prev.map((state) => ({
           ...state,
-          detectionStatus: "error" as const,
-          error: error instanceof Error ? error.message : "Detection failed",
+          detectionStatus: "error",
+          error: "An unexpected error occurred during detection.",
         }))
       );
 
       toast({
-        title: "Detection Failed",
-        description:
-          error instanceof Error
-            ? error.message
-            : "Failed to detect PII in documents",
+        title: "Error",
+        description: "An unexpected error occurred during PII detection.",
         variant: "destructive",
       });
+    } finally {
+      setIsDetectionRunning(false);
     }
   };
 
@@ -265,6 +334,9 @@ export default function SimpleDocumentIngestion() {
 
   const handleBulkMasking = async () => {
     try {
+      setIsMaskingRunning(true);
+      setMaskingMessage("Initializing masking process...");
+
       // Get all document IDs that have completed detection
       const documentsToMask = fileProcessingStates
         .filter(
@@ -282,6 +354,8 @@ export default function SimpleDocumentIngestion() {
         return;
       }
 
+      setMaskingMessage("Preparing documents for masking...");
+
       // Set all files to processing state
       setFileProcessingStates((prev) =>
         prev.map((state) =>
@@ -291,10 +365,17 @@ export default function SimpleDocumentIngestion() {
         )
       );
 
+      // Wait a moment to show the loading state
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      setMaskingMessage("Applying PII masking to all documents...");
+
       console.log("Starting bulk masking for documents:", documentsToMask);
       const response = await simpleProcessingApi.applyMaskingBulk(
         documentsToMask
       );
+
+      setMaskingMessage("Processing masking results...");
 
       if (response.status === "success" && response.data) {
         const { successful_maskings, failed_maskings } = response.data;
@@ -334,6 +415,8 @@ export default function SimpleDocumentIngestion() {
           })
         );
 
+        setMaskingMessage("Masking completed successfully!");
+
         toast({
           title: "Masking Complete",
           description: `Successfully masked ${successful_maskings.length} of ${documentsToMask.length} files.`,
@@ -341,6 +424,7 @@ export default function SimpleDocumentIngestion() {
       }
     } catch (error) {
       console.error("Bulk masking error:", error);
+      setMaskingMessage("Masking failed");
 
       // Update all processing files to error state
       setFileProcessingStates((prev) =>
@@ -362,6 +446,8 @@ export default function SimpleDocumentIngestion() {
           error instanceof Error ? error.message : "Failed to mask documents",
         variant: "destructive",
       });
+    } finally {
+      setIsMaskingRunning(false);
     }
   };
 
@@ -462,13 +548,58 @@ export default function SimpleDocumentIngestion() {
                     {currentPhase === "masking" && (
                       <Button
                         onClick={handleBulkMasking}
+                        disabled={isMaskingRunning}
                         className="flex items-center space-x-2"
                       >
-                        <Wand2 className="w-4 h-4" />
-                        <span>Apply Masking to All Files</span>
+                        {isMaskingRunning ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            <span>Applying Masking...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Wand2 className="w-4 h-4" />
+                            <span>Apply Masking to All Files</span>
+                          </>
+                        )}
                       </Button>
                     )}
                   </div>
+
+                  {/* Global Masking Loading State */}
+                  {isMaskingRunning && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="text-center space-y-4 p-6 bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 border border-purple-200 dark:border-purple-800 rounded-lg"
+                    >
+                      <div className="mx-auto w-16 h-16 bg-purple-100 dark:bg-purple-900/20 rounded-full flex items-center justify-center">
+                        <Wand2 className="w-8 h-8 text-purple-600 dark:text-purple-400" />
+                      </div>
+                      <h3 className="text-lg font-medium text-purple-900 dark:text-purple-100">
+                        Applying PII Masking
+                      </h3>
+                      <p className="text-purple-700 dark:text-purple-300 max-w-md mx-auto">
+                        {maskingMessage}
+                      </p>
+                      <div className="animate-pulse flex justify-center">
+                        <div className="flex space-x-1">
+                          <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce"></div>
+                          <div
+                            className="w-2 h-2 bg-purple-500 rounded-full animate-bounce"
+                            style={{ animationDelay: "0.1s" }}
+                          ></div>
+                          <div
+                            className="w-2 h-2 bg-purple-500 rounded-full animate-bounce"
+                            style={{ animationDelay: "0.2s" }}
+                          ></div>
+                        </div>
+                      </div>
+                      <div className="text-sm text-purple-600 dark:text-purple-400">
+                        Processing {uploadedFiles.length} documents...
+                      </div>
+                    </motion.div>
+                  )}
 
                   {/* File Tabs */}
                   <Tabs
@@ -542,14 +673,13 @@ export default function SimpleDocumentIngestion() {
                           className="space-y-6"
                         >
                           {currentPhase === "detection" && (
-                            <div className="text-center space-y-4">
+                            <div className="text-center space-y-6">
                               <h3 className="text-lg font-medium">
                                 PII Detection
                               </h3>
                               <p className="text-muted-foreground">
                                 {processingState?.detectionStatus ===
-                                  "processing" &&
-                                  "Analyzing document for PII..."}
+                                  "processing" && detectionMessage}
                                 {processingState?.detectionStatus ===
                                   "completed" &&
                                   `Found ${
@@ -561,8 +691,28 @@ export default function SimpleDocumentIngestion() {
                               </p>
                               {processingState?.detectionStatus ===
                                 "processing" && (
-                                <div className="animate-pulse flex justify-center">
-                                  <div className="w-6 h-6 bg-blue-500 rounded-full"></div>
+                                <div className="space-y-4">
+                                  <Progress
+                                    value={overallDetectionProgress}
+                                    className="w-full max-w-md mx-auto"
+                                  />
+                                  <div className="text-sm text-muted-foreground">
+                                    {Math.round(overallDetectionProgress)}%
+                                    complete
+                                  </div>
+                                  <div className="animate-pulse flex justify-center">
+                                    <div className="flex space-x-1">
+                                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+                                      <div
+                                        className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"
+                                        style={{ animationDelay: "0.1s" }}
+                                      ></div>
+                                      <div
+                                        className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"
+                                        style={{ animationDelay: "0.2s" }}
+                                      ></div>
+                                    </div>
+                                  </div>
                                 </div>
                               )}
                             </div>
