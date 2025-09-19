@@ -315,7 +315,7 @@ export default function LandingPage() {
 
           <div className="relative">
             {/* Workflow Steps */}
-            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
               {workflowSteps.map((step, index) => (
                 <motion.div
                   key={step.id}
