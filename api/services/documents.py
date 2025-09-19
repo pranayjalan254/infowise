@@ -214,7 +214,7 @@ def delete_document(doc_id: str):
 def get_document_stats():
     """Get user's document statistics."""
     try:
-        user_id = "a6b781b1-401b-435b-aaec-8821a38cf731"
+        user_id = "41d52297-aaed-4985-b403-2ce3aa9cf124"
         stats = mongo_db.get_user_stats(user_id)
         
         return success_response(
