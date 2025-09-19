@@ -19,9 +19,9 @@ import logging
 import json
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from dotenv import load_dotenv
+from langchain_ollama import ChatOllama
 
 # Load environment variables
 load_dotenv()
@@ -60,7 +60,7 @@ class PIIDetectorConfigGenerator:
     
     def __init__(self):
         self.ner_pipeline = None
-        self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash")
+        self.llm = ChatOllama(model="phi3:latest") 
         self._initialize_bert_model()
     
     def _initialize_bert_model(self):

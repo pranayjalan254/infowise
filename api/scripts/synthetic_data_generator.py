@@ -1,3 +1,4 @@
+from langchain_ollama import ChatOllama
 from langgraph.graph import StateGraph, START, END
 from typing import TypedDict, Annotated, Literal
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -14,7 +15,7 @@ load_dotenv()
 os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY")
 
 # ----- LLM -----
-llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash")
+llm = ChatOllama(model="phi3:latest")
 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
 # ----- Pre-processing: Chunk + Vector Store -----

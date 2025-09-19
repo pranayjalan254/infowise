@@ -10,6 +10,7 @@ import uuid
 from typing import Dict, Any, List
 from flask import Blueprint, request, current_app, make_response
 from flask_jwt_extended import jwt_required, get_jwt_identity
+from langchain_ollama import ChatOllama
 from utils.responses import success_response, error_response
 from utils.validation import validate_required_fields
 from utils.helpers import get_current_timestamp
@@ -32,11 +33,7 @@ load_dotenv()
 synthetic_data_bp = Blueprint('synthetic_data', __name__)
 
 # Initialize LLM
-llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash",
-    temperature=0.3,
-    max_tokens=8192
-)
+llm = ChatOllama(model="phi3:latest")
 
 # Simple State
 class SyntheticState(TypedDict):
