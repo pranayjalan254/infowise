@@ -164,9 +164,7 @@ export default function LandingPage() {
             <Button
               className="neumorphic-button bg-primary text-primary-foreground hover:bg-primary/90"
               onClick={() =>
-                document
-                  .getElementById("demo-section")
-                  ?.scrollIntoView({ behavior: "smooth" })
+                window.open("https://youtu.be/eyfm90poxEM", "_blank")
               }
             >
               View Demo
