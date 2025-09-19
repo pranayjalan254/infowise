@@ -15,7 +15,6 @@ import {
   X,
   Search,
   Code,
-  ExternalLink,
   Copy,
   BookOpen,
 } from "lucide-react";
@@ -77,27 +76,21 @@ export default function LandingPage() {
     },
     {
       id: 2,
-      title: "Masking",
-      description: "Intelligent redaction while preserving data utility",
-      icon: <Shield className="h-6 w-6" />,
-    },
-    {
-      id: 3,
       title: "Quality Assurance",
       description: "Self-correcting validation and accuracy verification",
       icon: <CheckCircle className="h-6 w-6" />,
+    },
+    {
+      id: 3,
+      title: "Masking",
+      description: "Intelligent redaction while preserving data utility",
+      icon: <Shield className="h-6 w-6" />,
     },
     {
       id: 4,
       title: "Synthetic Data Generation",
       description: "High-fidelity artificial datasets for safe AI training",
       icon: <Zap className="h-6 w-6" />,
-    },
-    {
-      id: 5,
-      title: "RAG Querying",
-      description: "Natural language interaction with protected datasets",
-      icon: <Search className="h-6 w-6" />,
     },
   ];
 
@@ -310,7 +303,7 @@ export default function LandingPage() {
               Streamlined Pipeline
             </Badge>
             <h2 className="text-5xl font-bold text-display text-foreground mb-6">
-              5-Step Privacy Protection
+              Multi-Step Privacy Protection
             </h2>
             <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
               Our streamlined workflow transforms sensitive data into safe,
