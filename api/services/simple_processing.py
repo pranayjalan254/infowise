@@ -580,7 +580,7 @@ class SimpleDocumentProcessor:
                         'status': 'masked',
                         'file_type': '.pdf',
                         'mime_type': 'application/pdf',
-                        'user_id': 'a6b781b1-401b-435b-aaec-8821a38cf731',
+                        'user_id': '41d52297-aaed-4985-b403-2ce3aa9cf124',
                         'upload_date': get_current_timestamp(),
                         'metadata': {
                             'original_document_id': document_id,
